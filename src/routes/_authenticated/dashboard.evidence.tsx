@@ -60,21 +60,21 @@ function EvidencePage() {
     queryFn: async () => (await supabase.from("blocks").select("id,name").order("name")).data ?? [],
   });
 
-  // Fetch real evidence from activities table
+  // Fetch real evidence from activities table.
+  // "blocks" is listed in the queryKey so this refetches if the blocks list loads after.
+  // Block name is resolved directly from the joined blocks(name) — no stale-closure risk.
   const {
     data: photos = [],
     isLoading: isLoadingEvidence,
     refetch: refetchEvidence,
   } = useQuery({
-    queryKey: ["evidence-gallery"],
+    queryKey: ["evidence-gallery", blocks],
     queryFn: async () => {
       const { data: activities, error } = await supabase
         .from("activities")
         .select("*, profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type), blocks(name)")
         .order("submitted_at", { ascending: false });
       if (error) throw error;
-
-      const blockMap = new Map((blocks ?? []).map((b) => [b.id, b.name]));
 
       const filtered = (activities ?? []).filter((a) => !!a.photo_url);
 
@@ -88,7 +88,8 @@ function EvidencePage() {
           date: a.activity_date,
           type: a.activity_type.replace(/_/g, " "),
           village: a.village_name,
-          block: (a.blocks as any)?.name || blockMap.get(a.block_id ?? "") || "Unknown Block",
+          // Use the joined blocks.name; no stale blockMap closure needed
+          block: (a.blocks as any)?.name || "Unknown Block",
           block_id: a.block_id || "",
           status: (a.status as string) || "Pending",
           latitude: 20.27,

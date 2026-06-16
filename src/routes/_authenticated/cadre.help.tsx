@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HelpCircle, ChevronDown, Camera, WifiOff, MapPin, FileImage, ArrowLeft, Send, Phone, User, Mail, Download, Clock } from "lucide-react";
+import { HelpCircle, ChevronDown, Camera, WifiOff, MapPin, FileImage, ArrowLeft, Send, Phone, User, Download, Clock, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-auth";
 import { useT } from "@/lib/i18n";
@@ -11,6 +11,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+
+interface ContactInfo {
+  full_name: string;
+  phone: string | null;
+}
 
 export const Route = createFileRoute("/_authenticated/cadre/help")({
   component: CadreHelpPage,
@@ -64,6 +69,51 @@ function CadreHelpPage() {
   const { data: profile } = useProfile();
   const { t, lang } = useT();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Fetch Block Coordinator: single query — profiles joined with user_roles,
+  // filtered to block_officer role and the cadre's own block_id.
+  // Uses Supabase's PostgREST inner join: profiles!inner(user_roles!inner(...))
+  // Falls back to null (shows "not available") if cadre has no block_id assigned.
+  const { data: blockCoordinator, isLoading: loadingBC } = useQuery<ContactInfo | null>({
+    queryKey: ["block-coordinator", profile?.block_id],
+    enabled: !!profile,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      if (!profile?.block_id) return null;
+      // Join profiles → user_roles in one round-trip, scoped to the cadre's block
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("profiles!inner(full_name, phone)")
+        .eq("role", "block_officer")
+        .eq("profiles.block_id", profile.block_id)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const p = (data as any).profiles;
+      return p ? { full_name: p.full_name, phone: p.phone ?? null } : null;
+    },
+  });
+
+  // Fetch District Admin: single query — user_roles joined with profiles,
+  // filtered to admin role. District-level: no block scoping needed.
+  const { data: districtAdmin, isLoading: loadingDA } = useQuery<ContactInfo | null>({
+    queryKey: ["district-admin"],
+    enabled: !!profile,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("profiles!inner(full_name, phone)")
+        .eq("role", "admin")
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const p = (data as any).profiles;
+      return p ? { full_name: p.full_name, phone: p.phone ?? null } : null;
+    },
+  });
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -319,22 +369,68 @@ function CadreHelpPage() {
           {t("coordinators_dir")}
         </h3>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 text-xs font-bold text-slate-700">
-          {/* Contact 1 */}
+          {/* Block Coordinator */}
           <div className="flex items-start gap-3 p-3 bg-slate-50/50 border border-slate-100 rounded-xl">
             <User className="h-8 w-8 text-slate-400 bg-white p-1.5 rounded-lg border border-slate-100 shrink-0" />
             <div className="space-y-1">
-              <h4 className="font-extrabold text-slate-800">{lang === "hi" ? "श्री राकेश कुमार" : "Block Coordinator"}</h4>
-              <p className="text-slate-500 flex items-center gap-1"><Phone className="h-3.5 w-3.5" /> +91 98765 43210</p>
-              <p className="text-slate-500 flex items-center gap-1"><Mail className="h-3.5 w-3.5" /> rakesh.nrlm@chhattisgarh.gov.in</p>
+              <h4 className="font-extrabold text-slate-800">
+                {lang === "hi" ? "ब्लॉक समन्वयक" : "Block Coordinator"}
+              </h4>
+              {loadingBC ? (
+                <p className="text-slate-400 text-[11px]">Loading...</p>
+              ) : blockCoordinator ? (
+                <>
+                  <p className="text-slate-700 font-extrabold">{blockCoordinator.full_name}</p>
+                  {blockCoordinator.phone ? (
+                    <p className="text-slate-500 flex items-center gap-1">
+                      <Phone className="h-3.5 w-3.5" />
+                      <a href={`tel:${blockCoordinator.phone}`} className="hover:text-blue-600 transition-colors">
+                        {blockCoordinator.phone}
+                      </a>
+                    </p>
+                  ) : (
+                    <p className="text-slate-400 flex items-center gap-1 italic text-[11px]">
+                      <AlertCircle className="h-3.5 w-3.5" /> No phone on record
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-slate-400 flex items-center gap-1 italic text-[11px]">
+                  <AlertCircle className="h-3.5 w-3.5" /> Contact information not available
+                </p>
+              )}
             </div>
           </div>
-          {/* Contact 2 */}
+          {/* District Admin */}
           <div className="flex items-start gap-3 p-3 bg-slate-50/50 border border-slate-100 rounded-xl">
             <User className="h-8 w-8 text-slate-400 bg-white p-1.5 rounded-lg border border-slate-100 shrink-0" />
             <div className="space-y-1">
-              <h4 className="font-extrabold text-slate-800">{lang === "hi" ? "श्रीमती सरिता वर्मा" : "District Admin"}</h4>
-              <p className="text-slate-500 flex items-center gap-1"><Phone className="h-3.5 w-3.5" /> +91 91234 56789</p>
-              <p className="text-slate-500 flex items-center gap-1"><Mail className="h-3.5 w-3.5" /> sarita.nrlm@chhattisgarh.gov.in</p>
+              <h4 className="font-extrabold text-slate-800">
+                {lang === "hi" ? "जिला प्रशासक" : "District Admin"}
+              </h4>
+              {loadingDA ? (
+                <p className="text-slate-400 text-[11px]">Loading...</p>
+              ) : districtAdmin ? (
+                <>
+                  <p className="text-slate-700 font-extrabold">{districtAdmin.full_name}</p>
+                  {districtAdmin.phone ? (
+                    <p className="text-slate-500 flex items-center gap-1">
+                      <Phone className="h-3.5 w-3.5" />
+                      <a href={`tel:${districtAdmin.phone}`} className="hover:text-blue-600 transition-colors">
+                        {districtAdmin.phone}
+                      </a>
+                    </p>
+                  ) : (
+                    <p className="text-slate-400 flex items-center gap-1 italic text-[11px]">
+                      <AlertCircle className="h-3.5 w-3.5" /> No phone on record
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-slate-400 flex items-center gap-1 italic text-[11px]">
+                  <AlertCircle className="h-3.5 w-3.5" /> Contact information not available
+                </p>
+              )}
             </div>
           </div>
         </div>

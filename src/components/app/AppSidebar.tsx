@@ -92,6 +92,9 @@ export function AppSidebar() {
 
   const isStaff = role === "admin" || role === "block_officer";
 
+  // Direct home route for the logo link — avoids the /home dispatcher round-trip
+  const homeRoute = isStaff ? "/dashboard" : "/cadre";
+
   const staffItems = [
     { to: "/dashboard", label: t("dashboard"), icon: LayoutDashboard, exact: true },
     { to: "/dashboard/users", label: t("cadre_management"), icon: Users },
@@ -123,7 +126,7 @@ export function AppSidebar() {
       className="border-r-0 [&_[data-sidebar=sidebar]]:bg-sidebar [&_[data-sidebar=sidebar]]:text-sidebar-foreground"
     >
       <SidebarHeader className="border-b border-sidebar-border/20 p-3">
-        <Link to="/home" className="flex items-center gap-3">
+        <Link to={homeRoute} className="flex items-center gap-3">
           <NrlmLogo />
           {!collapsed && (
             <div className="min-w-0 leading-tight">

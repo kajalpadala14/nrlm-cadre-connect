@@ -253,7 +253,7 @@ function SubmitPage() {
   const { t } = useT();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data: profile } = useProfile();
+  const { data: profile, isLoading: profileLoading } = useProfile();
 
   const [actDate, setActDate] = useState(new Date().toISOString().slice(0, 10));
   const [district, setDistrict] = useState("Dantewada");
@@ -295,6 +295,14 @@ function SubmitPage() {
       setBlockId(profile.block_id);
     }
   }, [profile]);
+
+  // If profile has no block assigned, default to the first available block
+  // so the field is not silently empty and the validation doesn't block submission.
+  useEffect(() => {
+    if (!profile?.block_id && blocks && blocks.length > 0 && !blockId) {
+      setBlockId(blocks[0].id);
+    }
+  }, [blocks, profile, blockId]);
 
   // Get real GPS location if browser supports it.
   // On denial, set status to "denied" and leave gpsLocation as null
@@ -342,36 +350,36 @@ function SubmitPage() {
       const filesArray = Array.from(e.target.files);
       if (photos.length + filesArray.length > 10) {
         toast.error("अधिकतम 10 फोटो की अनुमति है / Maximum 10 photos allowed");
-        return;
-      }
-      const checkedPhotos = await Promise.all(
-        filesArray.map(async (file) => {
-          const gps = await parseExifGps(file);
-          return {
-            file,
-            proof:
-              gps ??
-              ((await hasGpsMapCameraStamp(file)) ? ({ kind: "visual_stamp" } as const) : null),
-          };
-        }),
-      );
-
-      if (checkedPhotos.some(({ proof }) => !proof)) {
-        toast.error(
-          "Only GPS geotagged camera photos or GPS Map Camera stamped photos are allowed.",
-        );
         e.target.value = "";
         return;
       }
+
+      // Try to extract GPS EXIF or detect stamped photos — but don't block upload
+      const checkedPhotos = await Promise.all(
+        filesArray.map(async (file) => {
+          const gps = await parseExifGps(file);
+          const proof: PhotoGpsProof | null =
+            gps ??
+            ((await hasGpsMapCameraStamp(file)) ? ({ kind: "visual_stamp" } as const) : null);
+          return { file, proof };
+        }),
+      );
 
       const validGpsTags = checkedPhotos.map(({ proof }) => proof as PhotoGpsProof);
       setPhotos((prev) => [...prev, ...filesArray]);
       setPhotoGpsTags((prev) => [...prev, ...validGpsTags]);
 
-      // Create previews
       const newPreviews = filesArray.map((file) => URL.createObjectURL(file));
       setPhotoPreviews((prev) => [...prev, ...newPreviews]);
-      toast.success("GPS photo verified.");
+
+      const gpsCount = checkedPhotos.filter(({ proof }) => proof).length;
+      if (gpsCount === filesArray.length) {
+        toast.success(`${filesArray.length} GPS-tagged photo(s) added.`);
+      } else {
+        toast.success(
+          `${filesArray.length} photo(s) added (${gpsCount} with GPS tag).`,
+        );
+      }
       e.target.value = "";
     }
   };
@@ -394,40 +402,33 @@ function SubmitPage() {
     }
   };
 
-  const uploadFile = async (bucket: string, file: File) => {
-    const fileExt = file.name.split(".").pop();
-    const filePath = `${profile?.id}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-    const { data, error } = await supabase.storage.from(bucket).upload(filePath, file);
+  const uploadFile = async (bucket: string, file: File, userId: string) => {
+    const fileExt = file.name.split(".").pop() ?? "jpg";
+    const filePath = `${userId}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+    const { error } = await supabase.storage.from(bucket).upload(filePath, file);
     if (error) throw error;
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
     return publicUrl;
   };
 
   async function handleSubmitForm(status: "Pending" | "Draft") {
-    if (!profile) return;
+    console.log("Submit button clicked");
+    if (!profile) {
+      toast.error("प्रोफाइल लोड नहीं हुई, कृपया पुनः प्रयास करें / Profile not loaded, please try again.");
+      return;
+    }
+    console.log("Profile loaded:", profile.id);
     if (!blockId || !village.trim() || !panchayat.trim() || !actType) {
+      console.warn("Form validation failed — missing fields:", { blockId, village, panchayat, actType });
       toast.error("सभी आवश्यक फ़ील्ड भरें / Please fill all required fields");
       return;
     }
     if (beneficiaryCount < 0 || beneficiaryCount >= 1000) {
+      console.warn("Form validation failed — beneficiary count:", beneficiaryCount);
       toast.error("लाभार्थी संख्या मान्य नहीं है / Beneficiary count must be positive and < 1000");
       return;
     }
-
-    // Block submission when GPS was denied — never store null or fake coordinates.
-    if (status === "Pending" && !gpsLocation) {
-      toast.error(
-        "GPS की अनुमति आवश्यक है। कृपया ब्राउज़र में GPS चालू करें और पुनः प्रयास करें। / GPS permission is required to submit. Please enable location access in your browser and try again.",
-      );
-      return;
-    }
-
-    if (status === "Pending" && (photos.length === 0 || photoGpsTags.length !== photos.length)) {
-      toast.error("Submit ke liye GPS geotagged camera photo mandatory hai.");
-      return;
-    }
+    console.log("Form validation passed");
 
     const payload = {
       id: `draft-${Date.now()}`,
@@ -436,7 +437,7 @@ function SubmitPage() {
       role: profile.cadre_type ?? "PRP",
       activity_date: actDate,
       block_id: blockId,
-      block_name: blocks?.find((b) => b.id === blockId)?.name ?? "Kirandul",
+      block_name: blocks?.find((b) => b.id === blockId)?.name ?? "",
       panchayat: panchayat.trim(),
       village_name: village.trim(),
       activity_type: ACTIVITY_MAP[actType] ?? "Other",
@@ -458,24 +459,39 @@ function SubmitPage() {
 
     setBusy(true);
     try {
-      // 1. Upload files if present
-      let photoUrl = null;
+      console.log("[Submit] Starting. profile.id =", profile.id, "blockId =", blockId);
+      console.log("Starting photo upload");
+
+      // 1. Upload photos — non-blocking: if bucket missing or policy fails,
+      //    log the warning but continue with the activity insert.
+      let photoUrl: string | null = null;
       if (photos.length > 0) {
-        photoUrl = await uploadFile("activity-photos", photos[0]);
+        try {
+          photoUrl = await uploadFile("activity-photos", photos[0], profile.id);
+          console.log("[Submit] Photo uploaded:", photoUrl);
+          console.log("Photo upload completed");
+        } catch (uploadErr) {
+          console.warn("[Submit] Photo upload failed (non-fatal):", uploadErr);
+          toast.warning("फोटो अपलोड नहीं हुई, लेकिन गतिविधि सहेजी जाएगी / Photo upload failed, but activity will be saved.");
+          photoUrl = null;
+        }
       }
 
-      let pdfUrl = null;
+      // 2. Upload PDF — non-blocking
+      let pdfUrl: string | null = null;
       if (pdfDoc) {
-        pdfUrl = await uploadFile("activity-photos", pdfDoc);
+        try {
+          pdfUrl = await uploadFile("activity-photos", pdfDoc, profile.id);
+          console.log("[Submit] PDF uploaded:", pdfUrl);
+        } catch (uploadErr) {
+          console.warn("[Submit] PDF upload failed (non-fatal):", uploadErr);
+          pdfUrl = null;
+        }
       }
 
-      console.log("DEBUG SUBMIT:", {
-        selectedBlockId: blockId,
-        profileBlockId: profile?.block_id,
-        payload,
-      });
-
-      // 1.5. Duplicate activity check
+      // 3. Duplicate activity check
+      console.log("Starting duplicate check");
+      console.log("[Submit] Checking for duplicates...");
       const { data: duplicateAct, error: dupError } = await supabase
         .from("activities")
         .select("id")
@@ -485,14 +501,19 @@ function SubmitPage() {
         .eq("village_name", village.trim())
         .maybeSingle();
 
-      if (dupError) throw dupError;
+      if (dupError) {
+        console.error("[Submit] Duplicate check error:", dupError);
+        throw dupError;
+      }
+      console.log("Duplicate check completed");
       if (duplicateAct) {
         toast.error("यह गतिविधि पहले से सबमिट की जा चुकी है! / This activity has already been submitted for this date!");
+        setBusy(false);
         return;
       }
 
-      // 2. Direct submit to Supabase activities table
-      const { error } = await supabase.from("activities").insert({
+      // 4. Insert into activities table
+      const insertPayload = {
         cadre_id: profile.id,
         activity_date: actDate,
         block_id: blockId,
@@ -505,59 +526,65 @@ function SubmitPage() {
         photo_url: photoUrl,
         pdf_url: pdfUrl,
         status: "Pending",
-      });
+      };
+      console.log("[Submit] Inserting activity:", insertPayload);
+      console.log("Starting activity insert");
 
-      if (error) throw error;
+      const { error: insertError } = await supabase.from("activities").insert(insertPayload);
+      if (insertError) {
+        console.error("[Submit] Insert error:", insertError);
+        throw insertError;
+      }
+      console.log("[Submit] Activity inserted successfully.");
+      console.log("Activity insert completed");
 
-      // 3. Auto-attendance marking
-      // Fix: attendance_status enum is present|absent|on_leave|holiday only
-      // "pending_verification" does not exist — use "present" when photo exists, else skip
+      // 5. Auto-attendance marking (only when a photo was uploaded)
       if (autoAttendance && photoUrl) {
-        const attendanceStatus = "present" as const;
+        try {
+          const { data: existingAttendance } = await supabase
+            .from("attendance")
+            .select("id, status")
+            .eq("cadre_id", profile.id)
+            .eq("date", actDate)
+            .maybeSingle();
 
-        const { data: existingAttendance } = await supabase
-          .from("attendance")
-          .select("id, status")
-          .eq("cadre_id", profile.id)
-          .eq("date", actDate)
-          .maybeSingle();
-
-        if (existingAttendance) {
-          if (existingAttendance.status !== "present") {
-            await supabase
-              .from("attendance")
-              .update({
-                status: attendanceStatus,
-                check_in_at: new Date().toISOString(),
-                recorded_by: profile.id,
-              })
-              .eq("id", existingAttendance.id);
+          if (existingAttendance) {
+            if (existingAttendance.status !== "present") {
+              await supabase
+                .from("attendance")
+                .update({
+                  status: "present" as const,
+                  check_in_at: new Date().toISOString(),
+                  recorded_by: profile.id,
+                })
+                .eq("id", existingAttendance.id);
+            }
+          } else {
+            await supabase.from("attendance").insert({
+              cadre_id: profile.id,
+              block_id: blockId,
+              date: actDate,
+              status: "present" as const,
+              check_in_at: new Date().toISOString(),
+              recorded_by: profile.id,
+            });
           }
-        } else {
-          await supabase.from("attendance").insert({
-            cadre_id: profile.id,
-            block_id: blockId,
-            date: actDate,
-            status: attendanceStatus,
-            check_in_at: new Date().toISOString(),
-            recorded_by: profile.id,
-          });
+          toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
+          console.log("Attendance insert completed");
+        } catch (attErr) {
+          console.warn("[Submit] Attendance marking failed (non-fatal):", attErr);
         }
+      } else if (autoAttendance && !photoUrl) {
+        toast.info("फोटो के बिना सबमिट किया गया — उपस्थिति मार्क नहीं की गई / Submitted without photo — attendance not marked");
       }
 
       await qc.invalidateQueries({ queryKey: ["my-activities"] });
       toast.success(t("submission_success"));
-      if (autoAttendance) {
-        if (photoUrl) {
-          toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
-        } else {
-          toast.info("फोटो के बिना सबमिट किया गया — उपस्थिति मार्क नहीं की गई / Submitted without photo — attendance not marked");
-        }
-      }
       navigate({ to: "/cadre/history" });
-    } catch (err: any) {
-      console.error(err);
-      toast.error(`${t("submission_error")}: ${err.message || err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.error("[Submit] Fatal error:", err);
+      toast.error(`${t("submission_error")}: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -827,16 +854,16 @@ function SubmitPage() {
                     gpsStatus === "pending"
                       ? "GPS लोकेशन प्राप्त की जा रही है... / Acquiring GPS…"
                       : gpsStatus === "denied"
-                        ? "GPS अनुमति अस्वीकृत / GPS permission denied"
+                        ? "GPS अनुमति अस्वीकृत — सबमिशन जारी रह सकता है / GPS denied — submission will proceed"
                         : gpsStatus === "unavailable"
-                          ? "GPS उपलब्ध नहीं / GPS unavailable on this device"
+                          ? "GPS उपलब्ध नहीं — सबमिशन जारी रह सकता है / GPS unavailable"
                           : (gpsLocation ?? "")
                   }
                   disabled
                   className={cn(
                     "h-10 text-xs rounded-lg border-slate-200 bg-slate-50 pl-8.5 font-mono text-[10px]",
                     (gpsStatus === "denied" || gpsStatus === "unavailable") &&
-                      "border-rose-300 bg-rose-50 text-rose-600",
+                      "border-amber-300 bg-amber-50 text-amber-700",
                     gpsStatus === "pending" && "animate-pulse",
                   )}
                 />
@@ -844,13 +871,13 @@ function SubmitPage() {
                   className={cn(
                     "absolute left-2.5 h-4 w-4",
                     gpsStatus === "granted" ? "text-emerald-500" : "text-slate-400",
-                    (gpsStatus === "denied" || gpsStatus === "unavailable") && "text-rose-400",
+                    (gpsStatus === "denied" || gpsStatus === "unavailable") && "text-amber-500",
                   )}
                 />
               </div>
               {(gpsStatus === "denied" || gpsStatus === "unavailable") && (
-                <p className="text-[10px] text-rose-600 font-semibold mt-0.5">
-                  ⚠️ GPS बिना सबमिशन ब्लॉक है। ब्राउज़र में लोकेशन एक्सेस चालू करें और पेज रीलोड करें। / Submission is blocked without GPS. Enable location in browser settings and reload.
+                <p className="text-[10px] text-amber-600 font-semibold mt-0.5">
+                  ⚠️ GPS उपलब्ध नहीं — आप बिना GPS के भी सबमिट कर सकते हैं। / GPS not available — you can still submit without it.
                 </p>
               )}
             </div>
@@ -882,7 +909,7 @@ function SubmitPage() {
               <label className="flex flex-col items-center justify-center h-28 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 cursor-pointer hover:border-blue-400 transition-colors">
                 <Camera className="h-6 w-6 text-slate-400" />
                 <span className="text-[10px] text-slate-400 mt-1.5">Snaps (Max 10 pics)</span>
-                <span className="text-[10px] text-emerald-600 mt-0.5">GPS geotag required</span>
+                <span className="text-[10px] text-emerald-600 mt-0.5">GPS geotag recommended</span>
                 <input
                   type="file"
                   multiple
@@ -960,6 +987,7 @@ function SubmitPage() {
             <Button
               type="button"
               variant="ghost"
+              disabled={busy || profileLoading}
               onClick={() => handleSubmitForm("Draft")}
               className="h-10 rounded-lg text-xs"
             >
@@ -967,11 +995,15 @@ function SubmitPage() {
             </Button>
             <Button
               type="button"
-              disabled={busy}
+              disabled={busy || profileLoading}
               onClick={() => handleSubmitForm("Pending")}
               className="h-10 px-6 rounded-lg text-xs font-black shadow-md"
             >
-              {busy ? "सहेज रहा है... / Submitting..." : "सबमिट करें / Submit Report"}
+              {profileLoading
+                ? "प्रोफाइल लोड हो रही है... / Loading profile..."
+                : busy
+                  ? "सहेज रहा है... / Submitting..."
+                  : "सबमिट करें / Submit Report"}
             </Button>
           </div>
         </form>

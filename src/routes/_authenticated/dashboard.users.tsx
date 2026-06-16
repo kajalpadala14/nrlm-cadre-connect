@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Edit2, ShieldAlert, CheckCircle, XCircle } from "lucide-react";
+import { Plus, Trash2, Edit2, CheckCircle, XCircle, Shield, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,14 @@ interface CadreForm {
   pin: string;
 }
 
+interface StaffForm {
+  id: string;
+  name: string;
+  role: "block_officer" | "admin";
+  block_id: string; // required for block_officer, ignored for admin
+  phone: string;
+  pin: string;
+}
 
 const EMPTY_FORM: CadreForm = {
   id: "",
@@ -59,21 +67,62 @@ const EMPTY_FORM: CadreForm = {
   pin: "",
 };
 
+const EMPTY_STAFF_FORM: StaffForm = {
+  id: "",
+  name: "",
+  role: "block_officer",
+  block_id: "",
+  phone: "",
+  pin: "",
+};
+
 function UsersPage() {
   const { t } = useT();
   const { data: me } = useProfile();
   const isAdmin = highestRole(me?.roles ?? []) === "admin";
+
+  // Tab state: "cadres" | "staff"
+  const [activeTab, setActiveTab] = useState<"cadres" | "staff">("cadres");
 
   const [open, setOpen] = useState(false);
   const [editingCadre, setEditingCadre] = useState<CadreForm | null>(null);
   const [form, setForm] = useState<CadreForm>(EMPTY_FORM);
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Staff tab state
+  const [staffOpen, setStaffOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffForm | null>(null);
+  const [staffForm, setStaffForm] = useState<StaffForm>(EMPTY_STAFF_FORM);
+
   const { data: blocks } = useQuery({
     queryKey: ["blocks"],
     queryFn: async () => {
       const { data } = await supabase.from("blocks").select("id,name").order("name");
       return data ?? [];
+    },
+  });
+
+  // Fetch Block Officers and Admins for the Staff tab
+  const {
+    data: staffList = [],
+    isLoading: staffLoading,
+    refetch: refetchStaff,
+  } = useQuery({
+    queryKey: ["staff-list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("user_id, role, profiles!inner(id, full_name, phone, block_id)")
+        .in("role", ["admin", "block_officer"]);
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        id: r.profiles.id as string,
+        name: r.profiles.full_name as string,
+        role: r.role as "admin" | "block_officer",
+        block_id: (r.profiles.block_id ?? "") as string,
+        phone: (r.profiles.phone ?? "") as string,
+        pin: "••••",
+      }));
     },
   });
 
@@ -231,6 +280,98 @@ function UsersPage() {
       (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
+  // ── Staff tab handlers ───────────────────────────────────────────────────
+  const handleStaffOpenAdd = () => {
+    setEditingStaff(null);
+    setStaffForm(EMPTY_STAFF_FORM);
+    setStaffOpen(true);
+  };
+
+  const handleStaffOpenEdit = (s: StaffForm) => {
+    setEditingStaff(s);
+    setStaffForm(s);
+    setStaffOpen(true);
+  };
+
+  const handleStaffDelete = async (id: string, name: string) => {
+    if (confirm(`Delete staff user "${name}"? This cannot be undone.`)) {
+      try {
+        await deleteUser({ data: { id } });
+        toast.success("Staff user deleted.");
+        refetchStaff();
+      } catch (err: any) {
+        toast.error(`Error: ${err.message}`);
+      }
+    }
+  };
+
+  const handleStaffSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!staffForm.name.trim()) {
+      toast.error("Full name is required.");
+      return;
+    }
+    if (!editingStaff && !/^[0-9]{4}$/.test(staffForm.pin)) {
+      toast.error("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (staffForm.phone && !/^[0-9]{10}$/.test(staffForm.phone)) {
+      toast.error("Mobile number must be 10 digits.");
+      return;
+    }
+    if (staffForm.role === "block_officer" && !staffForm.block_id) {
+      toast.error("Block Officers must be assigned to a block.");
+      return;
+    }
+
+    try {
+      if (editingStaff) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({
+            full_name: staffForm.name,
+            phone: staffForm.phone || null,
+            block_id: staffForm.role === "block_officer" ? (staffForm.block_id || null) : null,
+          })
+          .eq("id", editingStaff.id);
+        if (error) throw error;
+
+        if (staffForm.pin && staffForm.pin !== "••••") {
+          if (!/^[0-9]{4}$/.test(staffForm.pin)) {
+            toast.error("PIN must be exactly 4 digits.");
+            return;
+          }
+          await resetUserPin({ data: { id: editingStaff.id, pin: staffForm.pin } });
+        }
+        toast.success("Staff details updated.");
+      } else {
+        const derivedUserId =
+          staffForm.name.trim().toLowerCase().replace(/[^a-z0-9]/g, "") +
+          "_" +
+          Math.floor(100 + Math.random() * 900);
+
+        await createUser({
+          data: {
+            user_id: derivedUserId,
+            pin: staffForm.pin,
+            full_name: staffForm.name,
+            phone: staffForm.phone || null,
+            role: staffForm.role,
+            cadre_type: null,
+            block_id: staffForm.role === "block_officer" ? (staffForm.block_id || null) : null,
+          },
+        });
+        toast.success(
+          staffForm.role === "block_officer" ? "Block Officer created." : "District Admin created.",
+        );
+      }
+      setStaffOpen(false);
+      refetchStaff();
+    } catch (err: any) {
+      toast.error(`Error: ${err.message}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -244,25 +385,66 @@ function UsersPage() {
           </p>
         </div>
         <div className="flex w-full sm:w-auto items-center gap-3">
-          <Input
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by name, role, block..."
-            className="h-10 flex-1 sm:w-64 rounded-xl border-slate-200 bg-white text-xs shadow-sm focus:ring-1 min-w-0"
-          />
-          <Button
-            onClick={handleOpenAdd}
-            className="h-10 rounded-xl px-4 font-bold shadow-md shrink-0"
-          >
-            <Plus className="mr-1.5 h-4 w-4" />
-            {t("add_cadre_btn")}
-          </Button>
+          {activeTab === "cadres" && (
+            <>
+              <Input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by name, role, block..."
+                className="h-10 flex-1 sm:w-64 rounded-xl border-slate-200 bg-white text-xs shadow-sm focus:ring-1 min-w-0"
+              />
+              <Button
+                onClick={handleOpenAdd}
+                className="h-10 rounded-xl px-4 font-bold shadow-md shrink-0"
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                {t("add_cadre_btn")}
+              </Button>
+            </>
+          )}
+          {activeTab === "staff" && isAdmin && (
+            <Button
+              onClick={handleStaffOpenAdd}
+              className="h-10 rounded-xl px-4 font-bold shadow-md shrink-0"
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add Staff
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Cadre Table Grid */}
-      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-        {/* Mobile Card Deck View */}
+      {/* Tab Switcher */}
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit text-xs font-bold">
+        <button
+          onClick={() => setActiveTab("cadres")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2 rounded-lg transition-all",
+            activeTab === "cadres"
+              ? "bg-white text-slate-800 shadow-sm"
+              : "text-slate-500 hover:text-slate-700",
+          )}
+        >
+          <Users className="h-3.5 w-3.5" />
+          Field Cadres
+        </button>
+        <button
+          onClick={() => setActiveTab("staff")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2 rounded-lg transition-all",
+            activeTab === "staff"
+              ? "bg-white text-slate-800 shadow-sm"
+              : "text-slate-500 hover:text-slate-700",
+          )}
+        >
+          <Shield className="h-3.5 w-3.5" />
+          Staff (Block Officers &amp; Admins)
+        </button>
+      </div>
+
+      {/* Cadre Table Grid — only shown when "cadres" tab is active */}
+      {activeTab === "cadres" && (
+      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">        {/* Mobile Card Deck View */}
         <div className="block md:hidden space-y-4">
           {isLoading ? (
             <div className="text-center py-8 text-slate-400 font-medium animate-pulse">
@@ -448,8 +630,230 @@ function UsersPage() {
           </table>
         </div>
       </div>
+      )} {/* end activeTab === "cadres" */}
 
-      {/* High-Fidelity Add / Edit Modal */}
+      {/* ── Staff Panel ── */}
+      {activeTab === "staff" && (
+        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+          <div className="hidden md:block overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-slate-400 font-bold uppercase tracking-wider">
+                  <th className="py-3 pr-3">Name</th>
+                  <th className="py-3 pr-3">System Role</th>
+                  <th className="py-3 pr-3">Assigned Block</th>
+                  <th className="py-3 pr-3">Phone</th>
+                  <th className="py-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {staffLoading ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400 animate-pulse">
+                      Loading staff...
+                    </td>
+                  </tr>
+                ) : staffList.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                      No Block Officers or Admins found. Add one using the button above.
+                    </td>
+                  </tr>
+                ) : (
+                  staffList.map((s) => (
+                    <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-3.5 pr-3 font-bold text-slate-700">{s.name}</td>
+                      <td className="py-3.5 pr-3">
+                        <span
+                          className={cn(
+                            "rounded-md px-2 py-0.5 font-bold text-[10px]",
+                            s.role === "admin"
+                              ? "bg-purple-50 text-purple-700"
+                              : "bg-emerald-50 text-emerald-700",
+                          )}
+                        >
+                          {s.role === "admin" ? "District Admin" : "Block Officer"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 pr-3 text-slate-600 font-semibold">
+                        {s.role === "admin" ? (
+                          <span className="text-slate-400 italic">District-wide</span>
+                        ) : (
+                          blockMap.get(s.block_id) ?? (
+                            <span className="text-amber-600 font-bold">⚠ No block assigned</span>
+                          )
+                        )}
+                      </td>
+                      <td className="py-3.5 pr-3 font-mono text-slate-600">{s.phone || "—"}</td>
+                      <td className="py-3.5 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {isAdmin && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleStaffOpenEdit(s)}
+                                className="h-8 w-8 text-blue-600 hover:bg-blue-50 rounded-lg p-0"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleStaffDelete(s.id, s.name)}
+                                className="h-8 w-8 text-rose-600 hover:bg-rose-50 rounded-lg p-0"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards for staff */}
+          <div className="block md:hidden space-y-4">
+            {staffLoading ? (
+              <div className="text-center py-8 text-slate-400 animate-pulse">Loading...</div>
+            ) : staffList.length === 0 ? (
+              <div className="text-center py-8 text-slate-400">No staff users found.</div>
+            ) : (
+              staffList.map((s) => (
+                <div key={s.id} className="rounded-xl border border-slate-100 p-4 shadow-sm bg-slate-50/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-sm text-slate-800">{s.name}</span>
+                    <span className={cn(
+                      "rounded-md px-2 py-0.5 font-bold text-[10px]",
+                      s.role === "admin" ? "bg-purple-50 text-purple-700" : "bg-emerald-50 text-emerald-700",
+                    )}>
+                      {s.role === "admin" ? "District Admin" : "Block Officer"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-600 font-semibold">
+                    Block: {s.role === "admin" ? "District-wide" : (blockMap.get(s.block_id) ?? "⚠ Unassigned")}
+                  </div>
+                  <div className="text-xs font-mono text-slate-500">{s.phone || "No phone"}</div>
+                  {isAdmin && (
+                    <div className="flex gap-2 pt-1">
+                      <Button size="sm" variant="outline" onClick={() => handleStaffOpenEdit(s)} className="h-8 text-xs text-blue-600 border-blue-200">
+                        <Edit2 className="h-3.5 w-3.5 mr-1" /> Edit
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleStaffDelete(s.id, s.name)} className="h-8 text-xs text-rose-600 border-rose-200">
+                        <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )} {/* end activeTab === "staff" */}
+
+      {/* ── Staff Add / Edit Dialog ── */}
+      <Dialog open={staffOpen} onOpenChange={setStaffOpen}>
+        <DialogContent className="max-w-md rounded-2xl p-6 shadow-xl border border-slate-100">
+          <DialogHeader className="border-b border-slate-100 pb-3">
+            <DialogTitle className="text-lg font-black text-slate-800">
+              {editingStaff ? "Edit Staff User" : "Add Staff User"}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleStaffSave} className="space-y-4 pt-3 text-xs font-bold text-slate-700">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-bold text-slate-500">Full Name</Label>
+              <Input
+                value={staffForm.name}
+                onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
+                placeholder="e.g. Ramesh Sharma"
+                className="h-10 rounded-lg border-slate-200 text-xs"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-bold text-slate-500">Mobile Number</Label>
+              <Input
+                maxLength={10}
+                inputMode="numeric"
+                value={staffForm.phone}
+                onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value.replace(/\D/g, "") })}
+                placeholder="e.g. 9876543210"
+                className="h-10 rounded-lg border-slate-200 text-xs"
+              />
+            </div>
+            {!editingStaff && (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-bold text-slate-500">System Role</Label>
+                <Select
+                  value={staffForm.role}
+                  onValueChange={(v) => setStaffForm({ ...staffForm, role: v as "block_officer" | "admin" })}
+                >
+                  <SelectTrigger className="h-10 rounded-lg border-slate-200 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="block_officer">Block Officer (Block Coordinator)</SelectItem>
+                    <SelectItem value="admin">Admin (District Admin)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {(staffForm.role === "block_officer") && (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-bold text-slate-500">
+                  Assigned Block <span className="text-rose-500">*</span>
+                </Label>
+                <Select
+                  value={staffForm.block_id}
+                  onValueChange={(v) => setStaffForm({ ...staffForm, block_id: v })}
+                >
+                  <SelectTrigger className="h-10 rounded-lg border-slate-200 text-xs">
+                    <SelectValue placeholder="Select Block" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(blocks ?? []).map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Cadres in this block will see this person as their Block Coordinator on the Help page.
+                </p>
+              </div>
+            )}
+            {staffForm.role === "admin" && (
+              <p className="text-[10px] text-slate-400 font-medium bg-purple-50 rounded-lg p-2.5 border border-purple-100">
+                Admins are District-level. All cadres will see this person as their District Admin on the Help page.
+              </p>
+            )}
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-bold text-slate-500">
+                {editingStaff ? "New PIN (leave blank to keep current)" : "Login PIN"}
+              </Label>
+              <Input
+                maxLength={4}
+                inputMode="numeric"
+                value={staffForm.pin}
+                onChange={(e) => setStaffForm({ ...staffForm, pin: e.target.value.replace(/\D/g, "") })}
+                placeholder="••••"
+                className="h-10 rounded-lg border-slate-200 text-xs"
+              />
+            </div>
+            <DialogFooter className="border-t border-slate-100 pt-4">
+              <Button type="button" variant="ghost" onClick={() => setStaffOpen(false)} className="rounded-lg h-10">
+                Cancel
+              </Button>
+              <Button type="submit" className="rounded-lg h-10 px-5 font-bold shadow-md">
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-xl rounded-2xl p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
           <DialogHeader className="border-b border-slate-100 pb-3">

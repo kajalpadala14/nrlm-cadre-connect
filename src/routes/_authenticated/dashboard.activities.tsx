@@ -68,11 +68,14 @@ function ActivitiesPage() {
   const { t } = useT();
   const { data: profile } = useProfile();
   const role = highestRole(profile?.roles ?? []);
-  // Filters removed — always show all blocks
-  const globalBlockId = "all";
+  // block_officer is auto-scoped to their own block; admins can pick any block
+  const officerBlockId = role === "block_officer" ? (profile?.block_id ?? null) : null;
 
   const [activeTab, setActiveTab] = useState<"list" | "form">("list");
   const [busy, setBusy] = useState(false);
+
+  // Block filter — admins can pick, block_officers are locked to their block
+  const [filterBlockId, setFilterBlockId] = useState<string>("all");
 
   // Local filter states for list searching
   const [filterCadreName, setFilterCadreName] = useState("");
@@ -121,15 +124,18 @@ function ActivitiesPage() {
     }
   }, [blocks, blockId]);
 
+  // Effective block for the query — block_officers are auto-scoped
+  const effectiveBlockId = officerBlockId ?? (filterBlockId === "all" ? null : filterBlockId);
+
   // Fetch real activities from Supabase joined with profiles and blocks
   const {
     data: dbActivities = [],
     isLoading: isLoadingActivities,
     refetch: refetchActivities,
   } = useQuery<any[]>({
-    queryKey: ["admin-activities-list"],
+    queryKey: ["admin-activities-list", effectiveBlockId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from("activities")
         .select(
           `
@@ -138,7 +144,10 @@ function ActivitiesPage() {
           blocks(name)
         `,
         )
-        .order("submitted_at", { ascending: false });
+        .order("submitted_at", { ascending: false })
+        .limit(500);
+      if (effectiveBlockId) q = q.eq("block_id", effectiveBlockId);
+      const { data, error } = await q;
       if (error) throw error;
       return data;
     },
@@ -148,6 +157,8 @@ function ActivitiesPage() {
   const activities: any[] = useMemo(() => {
     return dbActivities.map((a: any) => ({
       id: a.id,
+      cadre_id: a.cadre_id,
+      block_id: a.block_id || null,
       cadre_name: a.profiles?.full_name || "Unknown Cadre",
       role: a.profiles?.cadre_type || "PRP",
       date: a.activity_date,
@@ -394,11 +405,8 @@ function ActivitiesPage() {
 
   const filteredActivities = useMemo(() => {
     return (activities as any[]).filter((a: any) => {
-      const matchesBlock =
-        globalBlockId === "all" ||
-        a.block_name.toLowerCase() === globalBlockId.toLowerCase() ||
-        (globalBlockId.includes("mock") &&
-          a.block_name.toLowerCase() === globalBlockId.replace("-mock", "").toLowerCase());
+      // Block is already filtered server-side by effectiveBlockId; this is just a safety net
+      const matchesBlock = effectiveBlockId === null || a.block_id === effectiveBlockId;
       const matchesCadre =
         !filterCadreName.trim() ||
         a.cadre_name.toLowerCase().includes(filterCadreName.toLowerCase());
@@ -414,7 +422,7 @@ function ActivitiesPage() {
       const matchesDate = !filterDate || a.date === filterDate;
       return matchesBlock && matchesCadre && matchesType && matchesVillage && matchesDate;
     });
-  }, [activities, globalBlockId, filterCadreName, filterActType, filterVillage, filterDate]);
+  }, [activities, effectiveBlockId, filterCadreName, filterActType, filterVillage, filterDate]);
 
   // Build last-7-days chart data dynamically from the same filtered dataset
   const chartData = useMemo(() => {

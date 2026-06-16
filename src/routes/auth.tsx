@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
 import { signInWithIdPin, useSession } from "@/hooks/use-auth";
 import { ensureAdminSeeded } from "@/lib/admin.functions";
+import { supabase } from "@/integrations/supabase/client";
 import { Languages } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
@@ -59,7 +60,29 @@ function AuthPage() {
       }
 
       await signInWithIdPin(userId, pin);
-      navigate({ to: "/home", replace: true });
+
+      // Resolve the user's role immediately after sign-in so we can navigate
+      // directly to the correct section — no intermediate /home dispatcher hop.
+      let destination = "/home"; // fallback
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: roleRows } = await supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", user.id);
+          const roles = (roleRows ?? []).map((r) => r.role as string);
+          if (roles.includes("admin") || roles.includes("block_officer")) {
+            destination = "/dashboard";
+          } else if (roles.includes("cadre")) {
+            destination = "/cadre";
+          }
+        }
+      } catch {
+        // Role lookup failed — fall through to /home dispatcher as backup
+      }
+
+      navigate({ to: destination, replace: true });
     } catch {
       toast.error(t("invalid_credentials"));
     } finally {

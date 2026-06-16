@@ -19,11 +19,22 @@ export const Route = createFileRoute("/_authenticated")({
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) throw redirect({ to: "/" });
 
-    // Fetch the user's roles from user_roles table
-    const { data: roleRows } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", data.user.id);
+    // Fetch the user's roles from user_roles table.
+    // Retry once with a short delay in case the JWT/RLS hasn't propagated
+    // immediately after a fresh login (race condition on first navigation).
+    let roleRows: { role: string }[] | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 600));
+      const { data: rows } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.user.id);
+      if (rows && rows.length > 0) {
+        roleRows = rows;
+        break;
+      }
+      roleRows = rows;
+    }
 
     const roles = (roleRows ?? []).map((r) => r.role as string);
     const isStaff = roles.includes("admin") || roles.includes("block_officer");
