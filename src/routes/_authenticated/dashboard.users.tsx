@@ -103,6 +103,9 @@ function UsersPage() {
   });
 
   // Fetch Block Officers and Admins for the Staff tab
+  // NOTE: user_roles has no FK to profiles in the DB schema, so PostgREST
+  // rejects the profiles!inner(...) join with a 400. We fetch both tables
+  // separately and merge by user_id in JS — same pattern used by cadres-list.
   const {
     data: staffList = [],
     isLoading: staffLoading,
@@ -110,19 +113,58 @@ function UsersPage() {
   } = useQuery({
     queryKey: ["staff-list"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Step 1: fetch all admin / block_officer rows from user_roles
+      const { data: userRoles, error: rolesError } = await supabase
         .from("user_roles")
-        .select("user_id, role, profiles!inner(id, full_name, phone, block_id)")
+        .select("user_id, role")
         .in("role", ["admin", "block_officer"]);
-      if (error) throw error;
-      return (data ?? []).map((r: any) => ({
-        id: r.profiles.id as string,
-        name: r.profiles.full_name as string,
-        role: r.role as "admin" | "block_officer",
-        block_id: (r.profiles.block_id ?? "") as string,
-        phone: (r.profiles.phone ?? "") as string,
-        pin: "••••",
-      }));
+
+      if (rolesError) {
+        console.error("[staff-list] user_roles fetch error:", rolesError);
+        throw rolesError;
+      }
+      console.log("[staff-list] user_roles rows:", userRoles);
+
+      if (!userRoles || userRoles.length === 0) return [];
+
+      const staffUserIds = userRoles.map((r) => r.user_id);
+
+      // Step 2: fetch matching profiles
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, full_name, phone, block_id")
+        .in("id", staffUserIds);
+
+      if (profilesError) {
+        console.error("[staff-list] profiles fetch error:", profilesError);
+        throw profilesError;
+      }
+      console.log("[staff-list] profiles rows:", profiles);
+
+      // Step 3: merge by user_id === profile.id
+      const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
+
+      return userRoles
+        .map((r) => {
+          const profile = profileMap.get(r.user_id);
+          if (!profile) return null; // role row exists but no matching profile
+          return {
+            id: profile.id,
+            name: profile.full_name,
+            role: r.role as "admin" | "block_officer",
+            block_id: (profile.block_id ?? "") as string,
+            phone: (profile.phone ?? "") as string,
+            pin: "••••",
+          };
+        })
+        .filter(Boolean) as Array<{
+          id: string;
+          name: string;
+          role: "admin" | "block_officer";
+          block_id: string;
+          phone: string;
+          pin: string;
+        }>;
     },
   });
 
