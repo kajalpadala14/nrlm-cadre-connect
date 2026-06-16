@@ -38,7 +38,8 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
+  // TODO: Remove debug output once the root cause is confirmed and fixed.
+  console.error("[ErrorComponent] Caught error:", error);
   const router = useRouter();
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
@@ -46,13 +47,30 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
+      <div className="max-w-2xl w-full text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           This page didn't load
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
+
+        {/* ── DEBUG: Temporary error display — remove before going to production ── */}
+        <details className="mt-6 text-left rounded-lg border border-red-200 bg-red-50 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-red-700">
+            Error details (debug)
+          </summary>
+          <pre className="mt-3 overflow-auto whitespace-pre-wrap break-words text-xs text-red-800">
+            {String(error)}
+          </pre>
+          {error?.stack && (
+            <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words text-xs text-red-700 opacity-80">
+              {error.stack}
+            </pre>
+          )}
+        </details>
+        {/* ── END DEBUG ── */}
+
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {

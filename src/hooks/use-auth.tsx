@@ -56,15 +56,19 @@ function notifySessionListeners(s: SessionState) {
   _sessionListeners.forEach((fn) => fn(s));
 }
 
-// Bootstrap: resolve session once at module load time
-supabase.auth.getSession().then(({ data }) => {
-  notifySessionListeners({ userId: data.session?.user.id ?? null, ready: true });
-});
+// Bootstrap: resolve session once at module load time (client-only)
+// Guard required: these APIs call the lazy Supabase proxy which instantiates
+// the client and accesses localStorage — both are unavailable during SSR.
+if (typeof window !== "undefined") {
+  supabase.auth.getSession().then(({ data }) => {
+    notifySessionListeners({ userId: data.session?.user.id ?? null, ready: true });
+  });
 
-// Keep cache in sync with auth state changes (login / logout)
-supabase.auth.onAuthStateChange((_event, session) => {
-  notifySessionListeners({ userId: session?.user.id ?? null, ready: true });
-});
+  // Keep cache in sync with auth state changes (login / logout)
+  supabase.auth.onAuthStateChange((_event, session) => {
+    notifySessionListeners({ userId: session?.user.id ?? null, ready: true });
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 
