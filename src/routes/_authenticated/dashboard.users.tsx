@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Edit2, CheckCircle, XCircle, Shield, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -87,12 +87,16 @@ function UsersPage() {
   const [open, setOpen] = useState(false);
   const [editingCadre, setEditingCadre] = useState<CadreForm | null>(null);
   const [form, setForm] = useState<CadreForm>(EMPTY_FORM);
+  const [isCadreSaving, setIsCadreSaving] = useState(false);
+  const cadreSaveInFlightRef = useRef(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   // Staff tab state
   const [staffOpen, setStaffOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffForm | null>(null);
   const [staffForm, setStaffForm] = useState<StaffForm>(EMPTY_STAFF_FORM);
+  const [isStaffSaving, setIsStaffSaving] = useState(false);
+  const staffSaveInFlightRef = useRef(false);
 
   const { data: blocks } = useQuery({
     queryKey: ["blocks"],
@@ -211,12 +215,14 @@ function UsersPage() {
   const blockMap = new Map((blocks ?? []).map((b) => [b.id, b.name]));
 
   const handleOpenAdd = () => {
+    if (isCadreSaving) return;
     setEditingCadre(null);
     setForm(EMPTY_FORM);
     setOpen(true);
   };
 
   const handleOpenEdit = (cadre: CadreForm) => {
+    if (isCadreSaving) return;
     setEditingCadre(cadre);
     setForm(cadre);
     setOpen(true);
@@ -236,6 +242,7 @@ function UsersPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (cadreSaveInFlightRef.current) return;
     if (!form.name.trim()) {
       toast.error(t("toast_name_required"));
       return;
@@ -249,10 +256,15 @@ function UsersPage() {
       return;
     }
 
+    cadreSaveInFlightRef.current = true;
+    setIsCadreSaving(true);
     try {
       if (editingCadre) {
+        if (!editingCadre.id) {
+          throw new Error("Missing cadre record id. Please reopen the form and try again.");
+        }
         // Edit in profiles directly
-        const { error } = await supabase
+        const updateResult = await supabase
           .from("profiles")
           .update({
             full_name: form.name,
@@ -265,9 +277,14 @@ function UsersPage() {
             join_date: form.join_date || null,
             status: form.status || null,
           })
-          .eq("id", editingCadre.id);
+          .eq("id", editingCadre.id)
+          .select("id, user_id")
+          .maybeSingle();
 
-        if (error) throw error;
+        if (updateResult.error) throw updateResult.error;
+        if (!updateResult.data) {
+          throw new Error("Cadre record was not found. No new record was created.");
+        }
 
         // Check if PIN was changed
         if (form.pin && form.pin !== "••••") {
@@ -312,6 +329,9 @@ function UsersPage() {
       refetch();
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);
+    } finally {
+      cadreSaveInFlightRef.current = false;
+      setIsCadreSaving(false);
     }
   };
 
@@ -324,12 +344,14 @@ function UsersPage() {
 
   // ── Staff tab handlers ───────────────────────────────────────────────────
   const handleStaffOpenAdd = () => {
+    if (isStaffSaving) return;
     setEditingStaff(null);
     setStaffForm(EMPTY_STAFF_FORM);
     setStaffOpen(true);
   };
 
   const handleStaffOpenEdit = (s: StaffForm) => {
+    if (isStaffSaving) return;
     setEditingStaff(s);
     setStaffForm(s);
     setStaffOpen(true);
@@ -349,6 +371,7 @@ function UsersPage() {
 
   const handleStaffSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (staffSaveInFlightRef.current) return;
     if (!staffForm.name.trim()) {
       toast.error("Full name is required.");
       return;
@@ -366,17 +389,27 @@ function UsersPage() {
       return;
     }
 
+    staffSaveInFlightRef.current = true;
+    setIsStaffSaving(true);
     try {
       if (editingStaff) {
-        const { error } = await supabase
+        if (!editingStaff.id) {
+          throw new Error("Missing staff record id. Please reopen the form and try again.");
+        }
+        const updateResult = await supabase
           .from("profiles")
           .update({
             full_name: staffForm.name,
             phone: staffForm.phone || null,
             block_id: staffForm.role === "block_officer" ? (staffForm.block_id || null) : null,
           })
-          .eq("id", editingStaff.id);
-        if (error) throw error;
+          .eq("id", editingStaff.id)
+          .select("id, user_id")
+          .maybeSingle();
+        if (updateResult.error) throw updateResult.error;
+        if (!updateResult.data) {
+          throw new Error("Staff record was not found. No new record was created.");
+        }
 
         if (staffForm.pin && staffForm.pin !== "••••") {
           if (!/^[0-9]{4}$/.test(staffForm.pin)) {
@@ -411,6 +444,9 @@ function UsersPage() {
       refetchStaff();
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);
+    } finally {
+      staffSaveInFlightRef.current = false;
+      setIsStaffSaving(false);
     }
   };
 
@@ -798,7 +834,7 @@ function UsersPage() {
       )} {/* end activeTab === "staff" */}
 
       {/* ── Staff Add / Edit Dialog ── */}
-      <Dialog open={staffOpen} onOpenChange={setStaffOpen}>
+      <Dialog open={staffOpen} onOpenChange={(nextOpen) => !isStaffSaving && setStaffOpen(nextOpen)}>
         <DialogContent className="max-w-md rounded-2xl p-6 shadow-xl border border-slate-100">
           <DialogHeader className="border-b border-slate-100 pb-3">
             <DialogTitle className="text-lg font-black text-slate-800">
@@ -885,18 +921,28 @@ function UsersPage() {
               />
             </div>
             <DialogFooter className="border-t border-slate-100 pt-4">
-              <Button type="button" variant="ghost" onClick={() => setStaffOpen(false)} className="rounded-lg h-10">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setStaffOpen(false)}
+                disabled={isStaffSaving}
+                className="rounded-lg h-10"
+              >
                 Cancel
               </Button>
-              <Button type="submit" className="rounded-lg h-10 px-5 font-bold shadow-md">
-                Save
+              <Button
+                type="submit"
+                disabled={isStaffSaving}
+                className="rounded-lg h-10 px-5 font-bold shadow-md"
+              >
+                {isStaffSaving ? "Saving..." : "Save"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(nextOpen) => !isCadreSaving && setOpen(nextOpen)}>
         <DialogContent className="max-w-xl rounded-2xl p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
           <DialogHeader className="border-b border-slate-100 pb-3">
             <DialogTitle className="text-lg font-black text-slate-800">
@@ -1068,12 +1114,17 @@ function UsersPage() {
                 type="button"
                 variant="ghost"
                 onClick={() => setOpen(false)}
+                disabled={isCadreSaving}
                 className="rounded-lg h-10"
               >
                 {t("cancel_btn")}
               </Button>
-              <Button type="submit" className="rounded-lg h-10 px-5 font-bold shadow-md">
-                {t("save_btn")}
+              <Button
+                type="submit"
+                disabled={isCadreSaving}
+                className="rounded-lg h-10 px-5 font-bold shadow-md"
+              >
+                {isCadreSaving ? "Saving..." : t("save_btn")}
               </Button>
             </DialogFooter>
           </form>
