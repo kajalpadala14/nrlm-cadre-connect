@@ -11,11 +11,17 @@ function createSupabaseClient() {
 
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     const missing = [
-      ...(!SUPABASE_URL ? ["SUPABASE_URL"] : []),
-      ...(!SUPABASE_PUBLISHABLE_KEY ? ["SUPABASE_PUBLISHABLE_KEY"] : []),
+      ...(!SUPABASE_URL ? ["SUPABASE_URL / VITE_SUPABASE_URL"] : []),
+      ...(!SUPABASE_PUBLISHABLE_KEY ? ["SUPABASE_PUBLISHABLE_KEY / VITE_SUPABASE_PUBLISHABLE_KEY"] : []),
     ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(", ")}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
+    const message = `Missing Supabase environment variable(s): ${missing.join(", ")}. ` +
+      `Set these in Vercel project settings → Environment Variables.`;
+    console.error(`[Supabase client] ${message}`);
+    // During SSR the client should never be instantiated — the browser-only
+    // module-level calls in use-auth.tsx are guarded with typeof window checks.
+    // If we still reach here (e.g., a server function import), throw so the
+    // error is surfaced immediately with a clear message rather than a cryptic
+    // downstream crash.
     throw new Error(message);
   }
 
