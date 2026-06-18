@@ -929,6 +929,16 @@ function UsersPage() {
                 className="h-10 rounded-lg border-slate-200 text-xs"
               />
             </div>
+            {editingStaff && (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-bold text-slate-500">User ID</Label>
+                <Input
+                  readOnly
+                  value={staffForm.user_id || "Not assigned"}
+                  className="h-10 rounded-lg border-slate-200 bg-slate-50 font-mono text-xs text-slate-500"
+                />
+              </div>
+            )}
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-bold text-slate-500">Mobile Number</Label>
               <Input
