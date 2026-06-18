@@ -13,15 +13,10 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { supabase as browserClient } from "@/integrations/supabase/client";
 import { z } from "zod";
+import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
 
 // ─── Guard helper ─────────────────────────────────────────────
-async function requireStaff(supabase: typeof browserClient, userId: string) {
-  const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-  const isStaff = (roles ?? []).some((r) => r.role === "admin" || r.role === "block_officer");
-  if (!isStaff) throw new Error("Forbidden: staff only");
-}
 
 // ─── REPORT 1: Monthly Attendance Report ─────────────────────
 /**
@@ -44,7 +39,8 @@ export const getMonthlyReport = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
+    const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
     const [year, mon] = data.month.split("-").map(Number);
     const startDate = `${data.month}-01`;
@@ -53,7 +49,7 @@ export const getMonthlyReport = createServerFn({ method: "POST" })
     const { data: report, error } = await supabase.rpc("get_cadre_activity_report", {
       p_start_date: startDate,
       p_end_date: endDate,
-      p_block_id: data.block_id ?? null,
+      p_block_id: effectiveBlockId,
     });
 
     if (error) throw new Error(`Report error: ${error.message}`);
@@ -97,7 +93,8 @@ export const getActivityTypeReport = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
+    const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
     let query = supabase
       .from("activities")
@@ -110,8 +107,8 @@ export const getActivityTypeReport = createServerFn({ method: "POST" })
       .gte("activity_date", data.from_date)
       .lte("activity_date", data.to_date);
 
-    if (data.block_id) {
-      query = query.eq("block_id", data.block_id);
+    if (effectiveBlockId) {
+      query = query.eq("block_id", effectiveBlockId);
     }
 
     const { data: rows, error } = await query;
@@ -167,7 +164,8 @@ export const getPendingApprovalsSummary = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
+    const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
     let query = supabase
       .from("activity_approvals")
@@ -181,8 +179,8 @@ export const getPendingApprovalsSummary = createServerFn({ method: "POST" })
       )
       .eq("status", "pending");
 
-    if (data.block_id) {
-      query = query.eq("activities.block_id", data.block_id);
+    if (effectiveBlockId) {
+      query = query.eq("activities.block_id", effectiveBlockId);
     }
 
     const { data: rows, error } = await query;
@@ -230,7 +228,8 @@ export const getCoverageReport = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
+    const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
     let query = supabase
       .from("activities")
@@ -243,8 +242,8 @@ export const getCoverageReport = createServerFn({ method: "POST" })
       .lte("activity_date", data.to_date)
       .order("village_name");
 
-    if (data.block_id) {
-      query = query.eq("block_id", data.block_id);
+    if (effectiveBlockId) {
+      query = query.eq("block_id", effectiveBlockId);
     }
 
     const { data: rows, error } = await query;

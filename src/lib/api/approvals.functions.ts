@@ -14,15 +14,13 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { supabase as browserClient } from "@/integrations/supabase/client";
 import { z } from "zod";
+import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
 
 // ─── Guard helper ─────────────────────────────────────────────
 // Uses the same typed client instance from auth context
-async function requireStaff(supabase: typeof browserClient, userId: string) {
-  const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-  const isStaff = (roles ?? []).some((r) => r.role === "admin" || r.role === "block_officer");
-  if (!isStaff) throw new Error("Forbidden: staff only");
+async function requireStaff(supabase: Parameters<typeof requireStaffScope>[0], userId: string) {
+  await requireStaffScope(supabase, userId);
 }
 
 // ─── GET PENDING APPROVALS ───────────────────────────────────
@@ -55,7 +53,8 @@ export const getPendingApprovals = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
+    const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
     const today = new Date().toISOString().slice(0, 10);
     const monthStart = today.slice(0, 8) + "01";
@@ -83,8 +82,8 @@ export const getPendingApprovals = createServerFn({ method: "POST" })
       .order("created_at", { ascending: false })
       .range(offset, offset + data.page_size - 1);
 
-    if (data.block_id) {
-      query = query.eq("activities.block_id", data.block_id);
+    if (effectiveBlockId) {
+      query = query.eq("activities.block_id", effectiveBlockId);
     }
 
     const { data: approvals, count, error } = await query;
@@ -116,9 +115,19 @@ export const reviewActivity = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
 
     const now = new Date().toISOString();
+
+    const { data: scopedApproval, error: scopeErr } = await supabase
+      .from("activity_approvals")
+      .select("activity_id, activities!inner(block_id)")
+      .eq("id", data.approval_id)
+      .single();
+
+    if (scopeErr) throw new Error(`Approval error: ${scopeErr.message}`);
+    const activity = scopedApproval.activities as { block_id?: string | null } | null;
+    resolveScopedBlockId(scope, activity?.block_id ?? null);
 
     // Update the approval record
     const { data: approval, error: approvalErr } = await supabase
@@ -163,20 +172,27 @@ export const bulkApprove = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
 
     const now = new Date().toISOString();
 
     // Get activity IDs for the selected approvals
     const { data: approvals } = await supabase
       .from("activity_approvals")
-      .select("id, activity_id")
+      .select("id, activity_id, activities!inner(block_id)")
       .in("id", data.approval_ids)
       .eq("status", "pending"); // only process pending ones
 
     if (!approvals || approvals.length === 0) {
       throw new Error("No pending approvals found for the given IDs");
     }
+    if (approvals.length !== data.approval_ids.length) {
+      throw new Error("Some approvals were not found or are not accessible");
+    }
+    approvals.forEach((approval) => {
+      const activity = approval.activities as { block_id?: string | null } | null;
+      resolveScopedBlockId(scope, activity?.block_id ?? null);
+    });
 
     const approvalIds = approvals.map((a) => a.id);
     const activityIds = approvals.map((a) => a.activity_id);
@@ -262,7 +278,16 @@ export const reviewLeave = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    await requireStaff(supabase, userId);
+    const scope = await requireStaffScope(supabase, userId);
+
+    const { data: existingLeave, error: existingLeaveError } = await supabase
+      .from("leave_requests")
+      .select("block_id")
+      .eq("id", data.leave_id)
+      .single();
+
+    if (existingLeaveError) throw new Error(`Leave review error: ${existingLeaveError.message}`);
+    resolveScopedBlockId(scope, existingLeave?.block_id ?? null);
 
     const { data: leave, error } = await supabase
       .from("leave_requests")
@@ -273,7 +298,7 @@ export const reviewLeave = createServerFn({ method: "POST" })
         reviewed_at: new Date().toISOString(),
       })
       .eq("id", data.leave_id)
-      .select("cadre_id, start_date, end_date")
+      .select("cadre_id, block_id, start_date, end_date")
       .single();
 
     if (error) throw new Error(`Leave review error: ${error.message}`);
@@ -288,6 +313,7 @@ export const reviewLeave = createServerFn({ method: "POST" })
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         attendanceRecords.push({
           cadre_id: leave.cadre_id,
+          block_id: leave.block_id,
           date: d.toISOString().slice(0, 10),
           status: "on_leave" as const,
           recorded_by: userId,

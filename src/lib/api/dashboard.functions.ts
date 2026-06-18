@@ -13,6 +13,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
 
 // ─── GET DASHBOARD STATS ─────────────────────────────────────
 /**
@@ -33,13 +34,15 @@ export const getDashboardStats = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
+    const { supabase, userId } = context;
+    const scope = await requireStaffScope(supabase, userId);
+    const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
     const targetDate = data.date ?? new Date().toISOString().slice(0, 10);
 
     const { data: stats, error } = await supabase.rpc("get_dashboard_stats", {
       p_date: targetDate,
-      p_block_id: data.block_id ?? null,
+      p_block_id: effectiveBlockId,
     });
 
     if (error) throw new Error(`Dashboard stats error: ${error.message}`);
@@ -75,12 +78,7 @@ export const getBlockSummary = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-
-    // Only staff can see aggregate block stats
-    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-
-    const isStaff = (roles ?? []).some((r) => r.role === "admin" || r.role === "block_officer");
-    if (!isStaff) throw new Error("Forbidden: staff only");
+    const scope = await requireStaffScope(supabase, userId);
 
     const targetDate = data.date ?? new Date().toISOString().slice(0, 10);
 
@@ -90,7 +88,7 @@ export const getBlockSummary = createServerFn({ method: "POST" })
 
     if (error) throw new Error(`Block summary error: ${error.message}`);
 
-    return (summary ?? []) as Array<{
+    const rows = (summary ?? []) as Array<{
       block_id: string;
       block_name: string;
       total_cadres: number;
@@ -101,6 +99,8 @@ export const getBlockSummary = createServerFn({ method: "POST" })
       villages: number;
       attendance_pct: number;
     }>;
+
+    return scope.isAdmin ? rows : rows.filter((row) => row.block_id === scope.blockId);
   });
 
 // ─── GET RECENT ACTIVITY FEED ────────────────────────────────
@@ -121,10 +121,10 @@ export const getRecentActivityFeed = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-
-    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-
-    const isStaff = (roles ?? []).some((r) => r.role === "admin" || r.role === "block_officer");
+    const scope = await requireStaffScope(supabase, userId).catch(() => null);
+    const effectiveBlockId = scope
+      ? resolveScopedBlockId(scope, data.block_id ?? null)
+      : data.block_id ?? null;
 
     // For cadres, show only their own feed; for staff, show all
     let query = supabase
@@ -138,10 +138,10 @@ export const getRecentActivityFeed = createServerFn({ method: "POST" })
       .order("submitted_at", { ascending: false })
       .limit(data.limit);
 
-    if (!isStaff) {
+    if (!scope) {
       query = query.eq("cadre_id", userId);
-    } else if (data.block_id) {
-      query = query.eq("block_id", data.block_id);
+    } else if (effectiveBlockId) {
+      query = query.eq("block_id", effectiveBlockId);
     }
 
     const { data: feed, error } = await query;

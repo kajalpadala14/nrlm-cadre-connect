@@ -17,6 +17,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
 
 // Allowed MIME types
 const ALLOWED_MIME_TYPES = [
@@ -184,16 +185,13 @@ export const getEvidenceFiles = createServerFn({ method: "POST" })
 
     const { data: activity } = await supabase
       .from("activities")
-      .select("cadre_id")
+      .select("cadre_id, block_id")
       .eq("id", data.activity_id)
       .single();
 
-    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-
-    const isStaff = (roles ?? []).some((r) => r.role === "admin" || r.role === "block_officer");
-
-    if (!isStaff && activity?.cadre_id !== userId) {
-      throw new Error("Forbidden");
+    if (activity?.cadre_id !== userId) {
+      const scope = await requireStaffScope(supabase, userId);
+      resolveScopedBlockId(scope, activity?.block_id ?? null);
     }
 
     const { data: files, error } = await supabase
