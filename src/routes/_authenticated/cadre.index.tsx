@@ -46,6 +46,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import {
   BarChart,
   Bar,
@@ -127,6 +128,7 @@ function SkeletonTile() {
 function CadreDashboard() {
   const { t, lang } = useT();
   const { data: profile } = useProfile();
+  useActivityCacheSync();
   const { todayStr, firstDayStr, lastDayStr, last7, elapsedDays } = getDateStrings();
 
   const { data: todayAttendance, isLoading: loadingTodayAtt } = useQuery({

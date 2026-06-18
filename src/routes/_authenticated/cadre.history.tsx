@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/cadre/history")({
   component: HistoryPage,
@@ -58,6 +59,7 @@ function StatCard({ title, value, color }: { title: string; value: number | stri
 function HistoryPage() {
   const { t, lang } = useT();
   const { data: profile } = useProfile();
+  useActivityCacheSync();
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState("");

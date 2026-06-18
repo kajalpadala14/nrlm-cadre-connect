@@ -43,6 +43,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { BarChart3, Search, Calendar, Landmark } from "lucide-react";
+import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/dashboard/activities")({
   component: ActivitiesPage,
@@ -78,6 +79,7 @@ const isAllowedImageFile = (file: File) => {
 function ActivitiesPage() {
   const { t } = useT();
   const { data: profile } = useProfile();
+  useActivityCacheSync();
   const role = highestRole(profile?.roles ?? []);
   // block_officer is auto-scoped to their own block; admins can pick any block
   const officerBlockId = role === "block_officer" ? (profile?.block_id ?? null) : null;

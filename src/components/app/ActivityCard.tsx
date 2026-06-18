@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { invalidateActivityQueries } from "@/hooks/use-activity-cache-sync";
 
 export interface ActivityCardData {
   id: string;
@@ -32,6 +33,17 @@ export interface ActivityCardData {
   approved_at?: string | null;
   approved_by_name?: string | null;
 }
+
+const getActivityStoragePath = (urlOrPath?: string | null) => {
+  if (!urlOrPath) return null;
+  if (!urlOrPath.startsWith("http")) return urlOrPath;
+
+  const marker = "/activity-photos/";
+  const markerIndex = urlOrPath.indexOf(marker);
+  if (markerIndex === -1) return null;
+
+  return decodeURIComponent(urlOrPath.slice(markerIndex + marker.length).split("?")[0]);
+};
 
 export function ActivityCard({
   activity,
@@ -118,8 +130,7 @@ export function ActivityCard({
       toast.success("फोटो साक्ष्य अपलोड किया गया और उपस्थिति 'उपस्थित' मार्क की गई / Photo uploaded and attendance marked Present!");
       refetchAttendance();
       if (onRefetchHistory) onRefetchHistory();
-      qc.invalidateQueries({ queryKey: ["my-activities"] });
-      qc.invalidateQueries({ queryKey: ["dash-stats-raw"] });
+      invalidateActivityQueries(qc);
     } catch (err: any) {
       console.error(err);
       toast.error(`अपलोड विफल / Upload failed: ${err.message || err}`);
@@ -159,6 +170,27 @@ export function ActivityCard({
     if (!confirm("क्या आप वाकई इस गतिविधि को हटाना चाहते हैं? / Are you sure you want to delete this activity?")) return;
     setDeleting(true);
     try {
+      const { data: evidenceFiles } = await supabase
+        .from("evidence_files")
+        .select("storage_path")
+        .eq("activity_id", activity.id);
+      const storagePaths = (evidenceFiles ?? [])
+        .map((file) => file.storage_path)
+        .filter(Boolean);
+      const legacyStoragePaths = [
+        getActivityStoragePath(activity.photo_url),
+        getActivityStoragePath(activity.pdf_url),
+      ].filter((path): path is string => Boolean(path));
+      const pathsToRemove = Array.from(new Set([...storagePaths, ...legacyStoragePaths]));
+      if (pathsToRemove.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from("activity-photos")
+          .remove(pathsToRemove);
+        if (storageError) {
+          throw storageError;
+        }
+      }
+
       const { error } = await supabase
         .from("activities")
         .delete()
@@ -186,8 +218,7 @@ export function ActivityCard({
       toast.success("गतिविधि सफलतापूर्वक हटा दी गई / Activity deleted successfully!");
       setOpenDetailsDialog(false);
       if (onRefetchHistory) onRefetchHistory();
-      qc.invalidateQueries({ queryKey: ["my-activities"] });
-      qc.invalidateQueries({ queryKey: ["dash-stats-raw"] });
+      invalidateActivityQueries(qc);
     } catch (err: any) {
       toast.error(`हटाने में विफल / Deletion failed: ${err.message}`);
     } finally {

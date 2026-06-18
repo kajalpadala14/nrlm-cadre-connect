@@ -17,6 +17,7 @@ import { useT } from "@/lib/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { exportToExcel } from "@/lib/excel";
 import { cn } from "@/lib/utils";
+import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/dashboard/reports")({
   component: ReportsPage,
@@ -155,6 +156,7 @@ function ReportTable({
 // ─── Main Page ────────────────────────────────────────────────────────────
 function ReportsPage() {
   const { t } = useT();
+  useActivityCacheSync();
   const { data: profile } = useProfile();
   const role = highestRole(profile?.roles ?? []);
   const officerBlock = role === "block_officer" ? (profile?.block_id ?? null) : null;

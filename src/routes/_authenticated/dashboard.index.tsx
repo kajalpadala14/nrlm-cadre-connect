@@ -26,6 +26,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/dashboard/")({
   component: Overview,
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/_authenticated/dashboard/")({
 
 function Overview() {
   const { t, lang } = useT();
+  useActivityCacheSync();
   // Always show all blocks, always use today's date — filters removed
   const blockId = "all";
   const date = new Date();
