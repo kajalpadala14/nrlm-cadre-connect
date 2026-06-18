@@ -207,6 +207,7 @@ const dict = {
 
   // Table column headers (shared)
   col_name: { en: "Name", hi: "नाम" },
+  col_cadre_id: { en: "Cadre ID", hi: "कैडर आईडी" },
   col_role: { en: "Role", hi: "भूमिका" },
   col_gender: { en: "Gender", hi: "लिंग" },
   col_block: { en: "Block", hi: "ब्लॉक" },

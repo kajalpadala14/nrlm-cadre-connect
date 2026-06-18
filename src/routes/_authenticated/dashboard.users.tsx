@@ -32,6 +32,7 @@ export const Route = createFileRoute("/_authenticated/dashboard/users")({
 
 interface CadreForm {
   id: string;
+  user_id: string;
   name: string;
   role: string;
   gender: string;
@@ -55,6 +56,7 @@ interface StaffForm {
 
 const EMPTY_FORM: CadreForm = {
   id: "",
+  user_id: "",
   name: "",
   role: "PRP",
   gender: "Female",
@@ -198,6 +200,7 @@ function UsersPage() {
 
       return (profiles ?? []).map((p) => ({
         id: p.id,
+        user_id: p.user_id || "",
         name: p.full_name,
         role: p.cadre_type || "PRP",
         gender: p.gender || "Female",
@@ -338,6 +341,7 @@ function UsersPage() {
   const filteredCadres = cadres.filter(
     (c) =>
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.user_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase())),
   );
@@ -468,7 +472,7 @@ function UsersPage() {
               <Input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by name, role, block..."
+                placeholder="Search by name, Cadre ID, role, block..."
                 className="h-10 flex-1 sm:w-64 rounded-xl border-slate-200 bg-white text-xs shadow-sm focus:ring-1 min-w-0"
               />
               <Button
@@ -540,7 +544,14 @@ function UsersPage() {
               >
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-extrabold text-sm text-slate-800">{c.name}</span>
+                    <div className="min-w-0">
+                      <span className="block truncate font-extrabold text-sm text-slate-800">
+                        {c.name}
+                      </span>
+                      <span className="block truncate font-mono text-[10px] font-bold uppercase text-slate-400">
+                        Cadre ID: {c.user_id || "—"}
+                      </span>
+                    </div>
                     <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
                       {c.role}
                     </span>
@@ -613,6 +624,7 @@ function UsersPage() {
             <thead>
               <tr className="border-b border-slate-100 text-left text-slate-400 font-bold uppercase tracking-wider">
                 <th className="py-3 pr-3">{t("col_name")}</th>
+                <th className="py-3 pr-3">{t("col_cadre_id")}</th>
                 <th className="py-3 pr-3">{t("col_role")}</th>
                 <th className="py-3 pr-3">{t("col_gender")}</th>
                 <th className="py-3 pr-3">{t("col_block")}</th>
@@ -628,7 +640,7 @@ function UsersPage() {
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={11}
                     className="py-8 text-center text-slate-400 font-medium animate-pulse"
                   >
                     {t("loading_msg")}
@@ -636,7 +648,7 @@ function UsersPage() {
                 </tr>
               ) : filteredCadres.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-slate-400 font-medium">
+                  <td colSpan={11} className="py-8 text-center text-slate-400 font-medium">
                     {t("no_cadres_msg")}
                   </td>
                 </tr>
@@ -644,6 +656,9 @@ function UsersPage() {
                 filteredCadres.map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-3.5 pr-3 font-bold text-slate-700">{c.name}</td>
+                    <td className="py-3.5 pr-3 font-mono text-slate-600 font-semibold">
+                      {c.user_id || "—"}
+                    </td>
                     <td className="py-3.5 pr-3">
                       <span className="rounded-md bg-blue-50 px-2 py-0.5 font-bold text-blue-700">
                         {c.role}
