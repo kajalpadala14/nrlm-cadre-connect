@@ -46,10 +46,14 @@ interface CadreForm {
   pin: string;
 }
 
+type StaffSystemRole = "block_officer" | "admin";
+type StaffFormRole = StaffSystemRole | "BPM" | "DPM" | "AC";
+
 interface StaffForm {
   id: string;
+  user_id: string;
   name: string;
-  role: "block_officer" | "admin";
+  role: StaffFormRole;
   block_id: string; // required for block_officer, ignored for admin
   phone: string;
   pin: string;
@@ -72,12 +76,27 @@ const EMPTY_FORM: CadreForm = {
 
 const EMPTY_STAFF_FORM: StaffForm = {
   id: "",
+  user_id: "",
   name: "",
   role: "block_officer",
   block_id: "",
   phone: "",
   pin: "",
 };
+
+const getStaffSystemRole = (role: StaffFormRole): StaffSystemRole =>
+  role === "admin" || role === "DPM" ? "admin" : "block_officer";
+
+const getStaffRoleLabel = (role: StaffFormRole) =>
+  role === "admin"
+    ? "District Admin"
+    : role === "DPM"
+      ? "DPM (District Programme Manager)"
+      : role === "BPM"
+        ? "BPM (Block Programme Manager)"
+        : role === "AC"
+          ? "AC (Area Coordinator)"
+          : "Block Officer";
 
 function UsersPage() {
   const { t } = useT();
@@ -139,7 +158,7 @@ function UsersPage() {
       // Step 2: fetch matching profiles
       const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
-        .select("id, full_name, phone, block_id")
+        .select("id, user_id, full_name, phone, block_id")
         .in("id", staffUserIds);
 
       if (profilesError) {
@@ -157,8 +176,9 @@ function UsersPage() {
           if (!profile) return null; // role row exists but no matching profile
           return {
             id: profile.id,
+            user_id: profile.user_id || "",
             name: profile.full_name,
-            role: r.role as "admin" | "block_officer",
+            role: r.role as StaffSystemRole,
             block_id: (profile.block_id ?? "") as string,
             phone: (profile.phone ?? "") as string,
             pin: "••••",
@@ -166,8 +186,9 @@ function UsersPage() {
         })
         .filter(Boolean) as Array<{
           id: string;
+          user_id: string;
           name: string;
-          role: "admin" | "block_officer";
+          role: StaffSystemRole;
           block_id: string;
           phone: string;
           pin: string;
@@ -357,6 +378,17 @@ function UsersPage() {
       (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
+  const filteredStaff = staffList.filter((s) => {
+    const q = searchTerm.toLowerCase();
+    return (
+      s.name.toLowerCase().includes(q) ||
+      s.user_id.toLowerCase().includes(q) ||
+      s.role.toLowerCase().includes(q) ||
+      s.phone.toLowerCase().includes(q) ||
+      (s.block_id && blockMap.get(s.block_id)?.toLowerCase().includes(q))
+    );
+  });
+
   // ── Staff tab handlers ───────────────────────────────────────────────────
   const handleStaffOpenAdd = () => {
     if (isStaffSaving) return;
@@ -399,7 +431,8 @@ function UsersPage() {
       toast.error("Mobile number must be 10 digits.");
       return;
     }
-    if (staffForm.role === "block_officer" && !staffForm.block_id) {
+    const staffSystemRole = getStaffSystemRole(staffForm.role);
+    if (staffSystemRole === "block_officer" && !staffForm.block_id) {
       toast.error("Block Officers must be assigned to a block.");
       return;
     }
@@ -416,7 +449,7 @@ function UsersPage() {
           .update({
             full_name: staffForm.name,
             phone: staffForm.phone || null,
-            block_id: staffForm.role === "block_officer" ? (staffForm.block_id || null) : null,
+            block_id: staffSystemRole === "block_officer" ? (staffForm.block_id || null) : null,
           })
           .eq("id", editingStaff.id)
           .select("id, user_id")
@@ -446,13 +479,13 @@ function UsersPage() {
             pin: staffForm.pin,
             full_name: staffForm.name,
             phone: staffForm.phone || null,
-            role: staffForm.role,
+            role: staffSystemRole,
             cadre_type: null,
-            block_id: staffForm.role === "block_officer" ? (staffForm.block_id || null) : null,
+            block_id: staffSystemRole === "block_officer" ? (staffForm.block_id || null) : null,
           },
         });
         toast.success(
-          staffForm.role === "block_officer" ? "Block Officer created." : "District Admin created.",
+          `${getStaffRoleLabel(staffForm.role)} created.`,
         );
       }
       setStaffOpen(false);
@@ -496,13 +529,21 @@ function UsersPage() {
             </>
           )}
           {activeTab === "staff" && isAdmin && (
-            <Button
-              onClick={handleStaffOpenAdd}
-              className="h-10 rounded-xl px-4 font-bold shadow-md shrink-0"
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              Add Staff
-            </Button>
+            <>
+              <Input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by name, User ID, role, block..."
+                className="h-10 flex-1 sm:w-64 rounded-xl border-slate-200 bg-white text-xs shadow-sm focus:ring-1 min-w-0"
+              />
+              <Button
+                onClick={handleStaffOpenAdd}
+                className="h-10 rounded-xl px-4 font-bold shadow-md shrink-0"
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Add Staff
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -744,6 +785,7 @@ function UsersPage() {
               <thead>
                 <tr className="border-b border-slate-100 text-left text-slate-400 font-bold uppercase tracking-wider">
                   <th className="py-3 pr-3">Name</th>
+                  <th className="py-3 pr-3">User ID</th>
                   <th className="py-3 pr-3">System Role</th>
                   <th className="py-3 pr-3">Assigned Block</th>
                   <th className="py-3 pr-3">Phone</th>
@@ -753,20 +795,23 @@ function UsersPage() {
               <tbody className="divide-y divide-slate-50">
                 {staffLoading ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400 animate-pulse">
+                    <td colSpan={6} className="py-8 text-center text-slate-400 animate-pulse">
                       Loading staff...
                     </td>
                   </tr>
-                ) : staffList.length === 0 ? (
+                ) : filteredStaff.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
                       No Block Officers or Admins found. Add one using the button above.
                     </td>
                   </tr>
                 ) : (
-                  staffList.map((s) => (
+                  filteredStaff.map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="py-3.5 pr-3 font-bold text-slate-700">{s.name}</td>
+                      <td className="py-3.5 pr-3 font-mono text-slate-600 font-semibold">
+                        {s.user_id || "—"}
+                      </td>
                       <td className="py-3.5 pr-3">
                         <span
                           className={cn(
@@ -824,15 +869,22 @@ function UsersPage() {
           <div className="block md:hidden space-y-4">
             {staffLoading ? (
               <div className="text-center py-8 text-slate-400 animate-pulse">Loading...</div>
-            ) : staffList.length === 0 ? (
+            ) : filteredStaff.length === 0 ? (
               <div className="text-center py-8 text-slate-400">No staff users found.</div>
             ) : (
-              staffList.map((s) => (
+              filteredStaff.map((s) => (
                 <div key={s.id} className="rounded-xl border border-slate-100 p-4 shadow-sm bg-slate-50/30 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-sm text-slate-800">{s.name}</span>
+                    <div className="min-w-0">
+                      <span className="block truncate font-extrabold text-sm text-slate-800">
+                        {s.name}
+                      </span>
+                      <span className="block truncate font-mono text-[10px] font-bold uppercase text-slate-400">
+                        User ID: {s.user_id || "—"}
+                      </span>
+                    </div>
                     <span className={cn(
-                      "rounded-md px-2 py-0.5 font-bold text-[10px]",
+                      "shrink-0 rounded-md px-2 py-0.5 font-bold text-[10px]",
                       s.role === "admin" ? "bg-purple-50 text-purple-700" : "bg-emerald-50 text-emerald-700",
                     )}>
                       {s.role === "admin" ? "District Admin" : "Block Officer"}
@@ -893,7 +945,7 @@ function UsersPage() {
                 <Label className="text-xs font-bold text-slate-500">System Role</Label>
                 <Select
                   value={staffForm.role}
-                  onValueChange={(v) => setStaffForm({ ...staffForm, role: v as "block_officer" | "admin" })}
+                  onValueChange={(v) => setStaffForm({ ...staffForm, role: v as StaffFormRole })}
                 >
                   <SelectTrigger className="h-10 rounded-lg border-slate-200 text-xs">
                     <SelectValue />
@@ -901,14 +953,14 @@ function UsersPage() {
                   <SelectContent>
                     <SelectItem value="block_officer">Block Officer (Block Coordinator)</SelectItem>
                     <SelectItem value="admin">Admin (District Admin)</SelectItem>
-                    <SelectItem value="BPM">BPM(Block Programme Manager)</SelectItem>
+                    <SelectItem value="BPM">BPM (Block Programme Manager)</SelectItem>
                     <SelectItem value="DPM">DPM(District Programme Manager)</SelectItem>
-                    <SelectItem value="AC">AC(Area Coordinator)</SelectItem>
+                    <SelectItem value="AC">AC (Area Coordinator)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             )}
-            {(staffForm.role === "block_officer") && (
+            {getStaffSystemRole(staffForm.role) === "block_officer" && (
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">
                   Assigned Block <span className="text-rose-500">*</span>
@@ -931,7 +983,7 @@ function UsersPage() {
                 </p>
               </div>
             )}
-            {staffForm.role === "admin" && (
+            {getStaffSystemRole(staffForm.role) === "admin" && (
               <p className="text-[10px] text-slate-400 font-medium bg-purple-50 rounded-lg p-2.5 border border-purple-100">
                 Admins are District-level. All cadres will see this person as their District Admin on the Help page.
               </p>

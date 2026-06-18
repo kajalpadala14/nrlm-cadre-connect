@@ -18,6 +18,14 @@ function passwordFor(pin: string) {
   return `NRLM-${pin}`;
 }
 
+type CreateUserRole = "admin" | "block_officer" | "cadre" | "BPM" | "DPM" | "AC";
+
+function normalizeCreateUserRole(role: CreateUserRole): "admin" | "block_officer" | "cadre" {
+  if (role === "DPM") return "admin";
+  if (role === "BPM" || role === "AC") return "block_officer";
+  return role;
+}
+
 /**
  * Public bootstrap: if no admin exists yet, seed admin/1234.
  * Safe to call repeatedly; becomes a no-op once an admin exists.
@@ -74,7 +82,7 @@ const createUserInput = z.object({
   pin: pinSchema,
   full_name: z.string().trim().min(1).max(120),
   phone: z.string().trim().max(20).optional().nullable(),
-  role: z.enum(["admin", "block_officer", "cadre"]),
+  role: z.enum(["admin", "block_officer", "cadre", "BPM", "DPM", "AC"]),
   cadre_type: z
     .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP"])
     .nullable()
@@ -100,6 +108,7 @@ export const createUser = createServerFn({ method: "POST" })
     if (!isAdmin) throw new Error("Forbidden: admin only");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const systemRole = normalizeCreateUserRole(data.role);
 
     const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
       email: emailFor(data.user_id),
@@ -115,13 +124,13 @@ export const createUser = createServerFn({ method: "POST" })
       user_id: data.user_id,
       full_name: data.full_name,
       phone: data.phone ?? null,
-      cadre_type: data.role === "cadre" ? (data.cadre_type ?? null) : null,
+      cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
       block_id: data.block_id ?? null,
-      village: data.role === "cadre" ? (data.village ?? null) : null,
-      panchayat: data.role === "cadre" ? (data.panchayat ?? null) : null,
-      gender: data.role === "cadre" ? (data.gender ?? null) : null,
-      join_date: data.role === "cadre" ? (data.join_date ?? null) : null,
-      status: data.role === "cadre" ? (data.status ?? null) : null,
+      village: systemRole === "cadre" ? (data.village ?? null) : null,
+      panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
+      gender: systemRole === "cadre" ? (data.gender ?? null) : null,
+      join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
+      status: systemRole === "cadre" ? (data.status ?? null) : null,
     });
     if (pErr) {
       await supabaseAdmin.auth.admin.deleteUser(newId);
@@ -129,7 +138,7 @@ export const createUser = createServerFn({ method: "POST" })
     }
     const { error: rErr } = await supabaseAdmin
       .from("user_roles")
-      .insert({ user_id: newId, role: data.role });
+      .insert({ user_id: newId, role: systemRole });
     if (rErr) {
       await supabaseAdmin.auth.admin.deleteUser(newId);
       throw new Error(rErr.message);
