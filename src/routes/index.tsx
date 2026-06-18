@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getPublicDashboardData } from "@/lib/api/public.functions";
 import {
   BarChart,
   Bar,
@@ -46,27 +46,6 @@ export const Route = createFileRoute("/")({
   component: PublicIndex,
 });
 
-// ── helpers ────────────────────────────────────────────────────────────────
-function last30Days(): string[] {
-  const days: string[] = [];
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    days.push(d.toISOString().slice(0, 10));
-  }
-  return days;
-}
-
-function last7Labels(): string[] {
-  const labels: string[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    labels.push(d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }));
-  }
-  return labels;
-}
-
 // ── sub-components ─────────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-lg bg-slate-100", className)} />;
@@ -111,158 +90,38 @@ function PublicIndex() {
   // After login, /auth redirects to /home automatically.
 
   // ── public stats ──────────────────────────────────────────────────────
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["public-dashboard-stats"],
-    queryFn: async () => {
-      const { count: totalCadres } = await supabase
-        .from("user_roles")
-        .select("user_id", { count: "exact", head: true })
-        .eq("role", "cadre");
-
-      const since = new Date();
-      since.setDate(since.getDate() - 30);
-      const sinceStr = since.toISOString().slice(0, 10);
-      const { data: activeRows } = await supabase
-        .from("attendance")
-        .select("cadre_id")
-        .eq("status", "present")
-        .gte("date", sinceStr);
-      const activeCadres = new Set((activeRows ?? []).map((r) => r.cadre_id)).size;
-
-      const { count: totalActivities } = await supabase
-        .from("activities")
-        .select("id", { count: "exact", head: true });
-
-      const { data: villageRows } = await supabase.from("activities").select("village_name");
-      const villagesCovered = new Set((villageRows ?? []).map((r) => r.village_name)).size;
-
-      const { count: approvedActivities } = await supabase
-        .from("activities")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "Approved");
-
-      const { count: totalAttRecords } = await supabase
-        .from("attendance")
-        .select("id", { count: "exact", head: true });
-      const { count: presentRecords } = await supabase
-        .from("attendance")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "present");
-      const attendanceRate =
-        totalAttRecords && totalAttRecords > 0
-          ? Math.round(((presentRecords ?? 0) / totalAttRecords) * 100)
-          : 0;
-
-      return {
-        totalCadres: totalCadres ?? 0,
-        activeCadres,
-        totalActivities: totalActivities ?? 0,
-        villagesCovered,
-        approvedActivities: approvedActivities ?? 0,
-        attendanceRate,
-      };
-    },
+  const {
+    data: publicDashboard,
+    isLoading: publicLoading,
+    isError: publicError,
+    error: publicDashboardError,
+  } = useQuery({
+    queryKey: ["public-dashboard-data"],
+    queryFn: () => getPublicDashboardData(),
     staleTime: 5 * 60 * 1000,
   });
+
+  const stats = publicDashboard?.stats;
+  const blockData = publicDashboard?.blockData ?? [];
+  const activityTrendData = publicDashboard?.activityTrendData ?? [];
+  const attendanceTrendData = publicDashboard?.attendanceTrendData ?? [];
+  const publicDataErrorMessage =
+    publicDashboardError instanceof Error
+      ? publicDashboardError.message
+      : "Public dashboard data could not be loaded.";
 
   // ── block performance ─────────────────────────────────────────────────
-  const { data: blockData, isLoading: blockLoading } = useQuery({
-    queryKey: ["public-block-performance"],
-    queryFn: async () => {
-      const { data: blocks } = await supabase.from("blocks").select("id, name").order("name");
-      const { data: activities } = await supabase.from("activities").select("block_id, status");
-      const { data: cadreRoles } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "cadre");
-      const cadreIds = (cadreRoles ?? []).map((r) => r.user_id);
-
-      let profiles: { id: string; block_id: string | null }[] = [];
-      if (cadreIds.length > 0) {
-        const { data } = await supabase
-          .from("profiles")
-          .select("id, block_id")
-          .in("id", cadreIds);
-        profiles = data ?? [];
-      }
-
-      return (blocks ?? []).map((b) => {
-        const acts = (activities ?? []).filter((a) => a.block_id === b.id);
-        const cadresInBlock = profiles.filter((p) => p.block_id === b.id).length;
-        const approved = acts.filter((a) => a.status === "Approved").length;
-        const pending = acts.filter((a) => a.status === "Pending").length;
-        return {
-          name: b.name.length > 10 ? b.name.slice(0, 10) + "…" : b.name,
-          fullName: b.name,
-          cadres: cadresInBlock,
-          activities: acts.length,
-          approved,
-          pending,
-        };
-      });
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // ── activity trend ─────────────────────────────────────────────────────
-  const { data: activityTrendData, isLoading: trendLoading } = useQuery({
-    queryKey: ["public-activity-trend"],
-    queryFn: async () => {
-      const days = last30Days();
-      const { data: acts } = await supabase
-        .from("activities")
-        .select("activity_date, status")
-        .gte("activity_date", days[0])
-        .lte("activity_date", days[days.length - 1]);
-
-      const buckets: { label: string; total: number; approved: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const start = days[i * 5];
-        const end = days[Math.min(i * 5 + 4, 29)];
-        const label = new Date(start).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-        const slice = (acts ?? []).filter(
-          (a) => a.activity_date >= start && a.activity_date <= end,
-        );
-        buckets.push({
-          label,
-          total: slice.length,
-          approved: slice.filter((a) => a.status === "Approved").length,
-        });
-      }
-      return buckets;
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // ── attendance trend ───────────────────────────────────────────────────
-  const { data: attendanceTrendData, isLoading: attTrendLoading } = useQuery({
-    queryKey: ["public-attendance-trend"],
-    queryFn: async () => {
-      const days = last30Days().slice(-7);
-      const labels = last7Labels();
-      const { data: attRows } = await supabase
-        .from("attendance")
-        .select("date, status")
-        .gte("date", days[0]);
-
-      return days.map((day, i) => {
-        const dayRows = (attRows ?? []).filter((r) => r.date === day);
-        return {
-          label: labels[i],
-          present: dayRows.filter((r) => r.status === "present").length,
-          absent: dayRows.filter((r) => r.status === "absent").length,
-        };
-      });
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+  const statsLoading = publicLoading;
+  const blockLoading = publicLoading;
+  const trendLoading = publicLoading;
+  const attTrendLoading = publicLoading;
 
   // ── inline hero stats for the summary strip ───────────────────────────
   const heroStats = [
-    { value: statsLoading ? "—" : (stats?.totalActivities ?? 0), label: "Activities Tracked" },
-    { value: statsLoading ? "—" : (stats?.totalCadres ?? 0), label: "Cadres Deployed" },
-    { value: statsLoading ? "—" : (stats?.villagesCovered ?? 0), label: "Villages Reached" },
-    { value: statsLoading ? "—" : `${stats?.attendanceRate ?? 0}%`, label: "Attendance Rate" },
+    { value: statsLoading || publicError ? "—" : (stats?.totalActivities ?? 0), label: "Activities Tracked" },
+    { value: statsLoading || publicError ? "—" : (stats?.totalCadres ?? 0), label: "Cadres Deployed" },
+    { value: statsLoading || publicError ? "—" : (stats?.villagesCovered ?? 0), label: "Villages Reached" },
+    { value: statsLoading || publicError ? "—" : `${stats?.attendanceRate ?? 0}%`, label: "Attendance Rate" },
   ];
 
   return (
@@ -414,7 +273,11 @@ function PublicIndex() {
           </h2>
           <span className="text-[10px] font-semibold text-slate-400">— all-time programme data</span>
         </div>
-        {statsLoading ? (
+        {publicError ? (
+          <div className="rounded-2xl border border-rose-100 bg-rose-50 px-5 py-4 text-sm font-bold text-rose-700">
+            Public statistics are temporarily unavailable. {publicDataErrorMessage}
+          </div>
+        ) : statsLoading ? (
           <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-32 rounded-2xl" />
@@ -423,7 +286,7 @@ function PublicIndex() {
         ) : (
           <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
             <StatCard icon={Users} label="Total Cadres" labelHi="कुल कैडर" value={stats?.totalCadres ?? 0} sub="Registered across all blocks" color="bg-blue-50 text-blue-600" />
-            <StatCard icon={UserCheck} label="Active Cadres" labelHi="सक्रिय कैडर" value={stats?.activeCadres ?? 0} sub="Present in last 30 days" color="bg-emerald-50 text-emerald-600" />
+            <StatCard icon={UserCheck} label="Active Cadres" labelHi="सक्रिय कैडर" value={stats?.activeCadres ?? 0} sub="Marked active in profiles" color="bg-emerald-50 text-emerald-600" />
             <StatCard icon={ClipboardList} label="Total Activities" labelHi="कुल गतिविधियाँ" value={stats?.totalActivities ?? 0} sub="All time submissions" color="bg-violet-50 text-violet-600" />
             <StatCard icon={MapPin} label="Villages Covered" labelHi="गाँव कवरेज" value={stats?.villagesCovered ?? 0} sub="Unique villages reached" color="bg-orange-50 text-orange-600" />
             <StatCard icon={CalendarCheck} label="Attendance Rate" labelHi="उपस्थिति दर" value={`${stats?.attendanceRate ?? 0}%`} sub="Overall present rate" color="bg-teal-50 text-teal-600" />

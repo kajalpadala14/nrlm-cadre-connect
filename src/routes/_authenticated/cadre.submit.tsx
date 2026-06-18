@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,21 @@ type PhotoGpsTag = {
 };
 
 type PhotoGpsProof = PhotoGpsTag | { kind: "visual_stamp" };
+
+const MAX_PHOTOS = 10;
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png"];
+const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"];
+
+const formatFileSize = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+
+const isAllowedImageFile = (file: File) => {
+  const lowerName = file.name.toLowerCase();
+  return (
+    ALLOWED_IMAGE_TYPES.includes(file.type) ||
+    ALLOWED_IMAGE_EXTENSIONS.some((ext) => lowerName.endsWith(ext))
+  );
+};
 
 const ACTIVITY_TYPES_11 = [
   "SHG Meeting",
@@ -273,8 +288,11 @@ function SubmitPage() {
   // Attachments
   const [photos, setPhotos] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
-  const [photoGpsTags, setPhotoGpsTags] = useState<PhotoGpsProof[]>([]);
+  const [photoGpsTags, setPhotoGpsTags] = useState<(PhotoGpsProof | null)[]>([]);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [pdfDoc, setPdfDoc] = useState<File | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const photoPreviewUrlsRef = useRef<string[]>([]);
 
   // Offline caching simulator
   const [isOffline, setIsOffline] = useState(false);
@@ -338,6 +356,12 @@ function SubmitPage() {
     }
   }, []);
 
+  useEffect(() => {
+    return () => {
+      photoPreviewUrlsRef.current.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    };
+  }, []);
+
   const saveDraftsToLocalStorage = (newDrafts: any[]) => {
     setDrafts(newDrafts);
     if (typeof window !== "undefined") {
@@ -386,8 +410,73 @@ function SubmitPage() {
 
   const removePhoto = (idx: number) => {
     setPhotos((prev) => prev.filter((_, i) => i !== idx));
-    setPhotoPreviews((prev) => prev.filter((_, i) => i !== idx));
+    setPhotoPreviews((prev) => {
+      const removedPreview = prev[idx];
+      if (removedPreview) {
+        URL.revokeObjectURL(removedPreview);
+        photoPreviewUrlsRef.current = photoPreviewUrlsRef.current.filter((url) => url !== removedPreview);
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
     setPhotoGpsTags((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handlePhotoSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files ?? []);
+    if (selectedFiles.length === 0) return;
+
+    setPhotoUploadError(null);
+
+    const invalidFiles = selectedFiles.filter((file) => !isAllowedImageFile(file));
+    if (invalidFiles.length > 0) {
+      const message = "Only JPG, JPEG, and PNG photos are allowed.";
+      setPhotoUploadError(message);
+      toast.error(message);
+      e.target.value = "";
+      return;
+    }
+
+    const oversizedFiles = selectedFiles.filter((file) => file.size > MAX_IMAGE_SIZE_BYTES);
+    if (oversizedFiles.length > 0) {
+      const message = `Each photo must be ${formatFileSize(MAX_IMAGE_SIZE_BYTES)} or smaller.`;
+      setPhotoUploadError(message);
+      toast.error(message);
+      e.target.value = "";
+      return;
+    }
+
+    const remainingSlots = MAX_PHOTOS - photos.length;
+    if (remainingSlots <= 0) {
+      const message = "Maximum 10 photos allowed.";
+      setPhotoUploadError(message);
+      toast.error(message);
+      e.target.value = "";
+      return;
+    }
+
+    const filesArray = selectedFiles.slice(0, remainingSlots);
+    if (selectedFiles.length > remainingSlots) {
+      toast.warning(`Only ${remainingSlots} more photo(s) can be added. Maximum 10 photos allowed.`);
+    }
+
+    const checkedPhotos = await Promise.all(
+      filesArray.map(async (file) => {
+        const gps = await parseExifGps(file);
+        const proof: PhotoGpsProof | null =
+          gps ?? ((await hasGpsMapCameraStamp(file)) ? ({ kind: "visual_stamp" } as const) : null);
+        return { file, proof };
+      }),
+    );
+
+    const newPreviews = filesArray.map((file) => URL.createObjectURL(file));
+    photoPreviewUrlsRef.current.push(...newPreviews);
+    setPhotos((prev) => [...prev, ...filesArray]);
+    setPhotoPreviews((prev) => [...prev, ...newPreviews]);
+    setPhotoGpsTags((prev) => [...prev, ...checkedPhotos.map(({ proof }) => proof)]);
+
+    const gpsCount = checkedPhotos.filter(({ proof }) => proof).length;
+    toast.success(`${filesArray.length} photo(s) added (${gpsCount} with GPS tag).`);
+    e.target.value = "";
   };
 
   const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -402,13 +491,44 @@ function SubmitPage() {
     }
   };
 
-  const uploadFile = async (bucket: string, file: File, userId: string) => {
+  const uploadFile = async (bucket: string, file: File, userId: string, activityId?: string) => {
     const fileExt = file.name.split(".").pop() ?? "jpg";
-    const filePath = `${userId}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+    const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || `photo.${fileExt}`;
+    const filePath = `${userId}/${activityId ? `${activityId}/` : ""}${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${safeFileName}`;
     const { error } = await supabase.storage.from(bucket).upload(filePath, file);
     if (error) throw error;
     const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
-    return publicUrl;
+    return { publicUrl, storagePath: filePath };
+  };
+
+  const uploadActivityPhotos = async (activityId: string, userId: string) => {
+    const uploadedPhotos = [];
+
+    for (const [idx, file] of photos.entries()) {
+      const { publicUrl, storagePath } = await uploadFile("activity-photos", file, userId, activityId);
+      const gpsProof = photoGpsTags[idx];
+      const gps = gpsProof && "latitude" in gpsProof ? gpsProof : null;
+      uploadedPhotos.push({ publicUrl, storagePath, file, gps });
+    }
+
+    if (uploadedPhotos.length > 0) {
+      const { error } = await supabase.from("evidence_files").insert(
+        uploadedPhotos.map(({ publicUrl, storagePath, file, gps }) => ({
+          activity_id: activityId,
+          cadre_id: userId,
+          storage_path: storagePath,
+          public_url: publicUrl,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || null,
+          latitude: gps?.latitude ?? null,
+          longitude: gps?.longitude ?? null,
+        })),
+      );
+      if (error) throw error;
+    }
+
+    return uploadedPhotos.map((photo) => photo.publicUrl);
   };
 
   async function handleSubmitForm(status: "Pending" | "Draft") {
@@ -465,9 +585,9 @@ function SubmitPage() {
       // 1. Upload photos — non-blocking: if bucket missing or policy fails,
       //    log the warning but continue with the activity insert.
       let photoUrl: string | null = null;
-      if (photos.length > 0) {
+      if (false && photos.length > 0) {
         try {
-          photoUrl = await uploadFile("activity-photos", photos[0], profile.id);
+          photoUrl = (await uploadFile("activity-photos", photos[0], profile.id)).publicUrl;
           console.log("[Submit] Photo uploaded:", photoUrl);
           console.log("Photo upload completed");
         } catch (uploadErr) {
@@ -481,7 +601,7 @@ function SubmitPage() {
       let pdfUrl: string | null = null;
       if (pdfDoc) {
         try {
-          pdfUrl = await uploadFile("activity-photos", pdfDoc, profile.id);
+          pdfUrl = (await uploadFile("activity-photos", pdfDoc, profile.id)).publicUrl;
           console.log("[Submit] PDF uploaded:", pdfUrl);
         } catch (uploadErr) {
           console.warn("[Submit] PDF upload failed (non-fatal):", uploadErr);
@@ -530,13 +650,31 @@ function SubmitPage() {
       console.log("[Submit] Inserting activity:", insertPayload);
       console.log("Starting activity insert");
 
-      const { error: insertError } = await supabase.from("activities").insert(insertPayload);
+      const { data: insertedActivity, error: insertError } = await supabase
+        .from("activities")
+        .insert(insertPayload)
+        .select("id")
+        .single();
       if (insertError) {
         console.error("[Submit] Insert error:", insertError);
         throw insertError;
       }
       console.log("[Submit] Activity inserted successfully.");
       console.log("Activity insert completed");
+
+      if (photos.length > 0 && insertedActivity?.id) {
+        try {
+          const photoUrls = await uploadActivityPhotos(insertedActivity.id, profile.id);
+          photoUrl = photoUrls[0] ?? null;
+          if (photoUrl) {
+            await supabase.from("activities").update({ photo_url: photoUrl }).eq("id", insertedActivity.id);
+          }
+          console.log("[Submit] Photos uploaded:", photoUrls.length);
+        } catch (uploadErr) {
+          console.warn("[Submit] Photo upload failed (non-fatal):", uploadErr);
+          toast.warning("Photo upload failed, but activity was saved.");
+        }
+      }
 
       // 5. Auto-attendance marking (only when a photo was uploaded)
       if (autoAttendance && photoUrl) {
@@ -906,19 +1044,26 @@ function SubmitPage() {
             {/* Image upload preview */}
             <div className="flex flex-col gap-1.5">
               <Label className="text-slate-500 font-bold">साक्ष्य चित्र / Capture Photos</Label>
-              <label className="flex flex-col items-center justify-center h-28 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 cursor-pointer hover:border-blue-400 transition-colors">
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="flex flex-col items-center justify-center h-28 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 cursor-pointer hover:border-blue-400 transition-colors"
+              >
                 <Camera className="h-6 w-6 text-slate-400" />
                 <span className="text-[10px] text-slate-400 mt-1.5">Snaps (Max 10 pics)</span>
                 <span className="text-[10px] text-emerald-600 mt-0.5">GPS geotag recommended</span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                />
-              </label>
+              </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                onChange={handlePhotoSelection}
+                className="sr-only"
+              />
+              {photoUploadError && (
+                <p className="text-[10px] text-rose-500 font-semibold">{photoUploadError}</p>
+              )}
               {photoPreviews.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1.5">
                   {photoPreviews.map((src, idx) => (
@@ -928,10 +1073,14 @@ function SubmitPage() {
                     >
                       <img src={src} className="h-full w-full object-cover" />
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                        <Trash2
+                        <button
+                          type="button"
                           onClick={() => removePhoto(idx)}
-                          className="h-3.5 w-3.5 text-white cursor-pointer"
-                        />
+                          className="text-white cursor-pointer"
+                          aria-label={`Remove photo ${idx + 1}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))}
