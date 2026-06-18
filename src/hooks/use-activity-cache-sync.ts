@@ -14,7 +14,7 @@ const ACTIVITY_QUERY_PREFIXES = [
   ["rpt-activity"],
   ["rpt-cp-act"],
   ["rpt-bp-act"],
-  ["public-dashboard"],
+  ["public-dashboard-data"],
 ];
 
 export function invalidateActivityQueries(queryClient: QueryClient) {

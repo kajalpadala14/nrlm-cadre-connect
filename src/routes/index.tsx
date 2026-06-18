@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicDashboardData } from "@/lib/api/public.functions";
+import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import {
   BarChart,
   Bar,
@@ -85,6 +86,8 @@ function StatCard({
 
 // ── main component ─────────────────────────────────────────────────────────
 function PublicIndex() {
+  useActivityCacheSync();
+
   // No session check needed — public page is always shown as-is.
   // The Login to Dashboard button always goes to /auth.
   // After login, /auth redirects to /home automatically.
@@ -99,6 +102,8 @@ function PublicIndex() {
     queryKey: ["public-dashboard-data"],
     queryFn: () => getPublicDashboardData(),
     staleTime: 5 * 60 * 1000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const stats = publicDashboard?.stats;

@@ -116,7 +116,6 @@ function Overview() {
       actTodayQ = actTodayQ.eq("activity_date", dateStr);
       const { data: actTodayRows } = await actTodayQ;
 
-      const activeTodayIds = new Set((actTodayRows ?? []).map((r) => r.cadre_id));
       const villagesToday = new Set((actTodayRows ?? []).map((r) => r.village_name));
       const evidenceUploadedToday = actTodayRows?.filter((r) => r.photo_url).length ?? 0;
 
@@ -172,11 +171,11 @@ function Overview() {
           .select("user_id")
           .eq("role", "cadre");
         const cadreIds = cadreRoles?.map((r) => r.user_id) || [];
-        let profs: { id: string; block_id: string | null }[] = [];
+        let profs: { id: string; block_id: string | null; status: string | null }[] = [];
         if (cadreIds.length > 0) {
           const { data } = await supabase
             .from("profiles")
-            .select("id, block_id")
+            .select("id, block_id, status")
             .in("id", cadreIds);
           profs = data || [];
         }
@@ -197,8 +196,8 @@ function Overview() {
 
           const presentAttInBlock =
             atts?.filter((a) => a.block_id === b.id && a.status === "present") ?? [];
-          const active = presentAttInBlock.length;
-          const inactive = Math.max(0, total - active);
+          const active = cadresInBlock.filter((p) => (p.status ?? "Active") === "Active").length;
+          const inactive = cadresInBlock.filter((p) => p.status === "Inactive").length;
 
           const actsInBlock = acts?.filter((a) => a.block_id === b.id) ?? [];
           const activities = actsInBlock.length;
@@ -206,7 +205,8 @@ function Overview() {
           const uniqueVillages = new Set(actsInBlock.map((a) => a.village_name));
           const villages = uniqueVillages.size;
 
-          const attendance = total > 0 ? ((active / total) * 100).toFixed(2) + "%" : "0.00%";
+          const attendance =
+            total > 0 ? ((presentAttInBlock.length / total) * 100).toFixed(2) + "%" : "0.00%";
 
           return {
             name: b.name,

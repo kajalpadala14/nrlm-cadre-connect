@@ -35,13 +35,15 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   const [
     cadreRolesResult,
     blocksResult,
-    activitiesResult,
+    allActivitiesResult,
+    recentActivitiesResult,
     attendanceResult,
     totalAttResult,
     presentAttResult,
   ] = await Promise.all([
     supabaseAdmin.from("user_roles").select("user_id").eq("role", "cadre"),
     supabaseAdmin.from("blocks").select("id, name").order("name"),
+    supabaseAdmin.from("activities").select("id, block_id, village_name, activity_date, status"),
     supabaseAdmin
       .from("activities")
       .select("id, block_id, village_name, activity_date, status")
@@ -56,7 +58,8 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
 
   assertNoError(cadreRolesResult.error, "Cadre role count failed");
   assertNoError(blocksResult.error, "Block query failed");
-  assertNoError(activitiesResult.error, "Activity query failed");
+  assertNoError(allActivitiesResult.error, "Activity query failed");
+  assertNoError(recentActivitiesResult.error, "Recent activity query failed");
   assertNoError(attendanceResult.error, "Attendance query failed");
   assertNoError(totalAttResult.error, "Attendance total count failed");
   assertNoError(presentAttResult.error, "Present attendance count failed");
@@ -69,7 +72,8 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   assertNoError(profilesResult.error, "Cadre profile query failed");
 
   const profiles = profilesResult.data ?? [];
-  const activities = activitiesResult.data ?? [];
+  const activities = allActivitiesResult.data ?? [];
+  const recentActivities = recentActivitiesResult.data ?? [];
   const attendance = attendanceResult.data ?? [];
   const totalCadres = cadreIds.length;
   const activeCadres = profiles.filter((p) => (p.status ?? "Active") === "Active").length;
@@ -101,7 +105,7 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
       day: "2-digit",
       month: "short",
     });
-    const slice = activities.filter((a) => a.activity_date >= start && a.activity_date <= end);
+    const slice = recentActivities.filter((a) => a.activity_date >= start && a.activity_date <= end);
     return {
       label,
       total: slice.length,
