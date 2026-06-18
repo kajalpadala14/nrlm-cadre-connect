@@ -901,6 +901,9 @@ function UsersPage() {
                   <SelectContent>
                     <SelectItem value="block_officer">Block Officer (Block Coordinator)</SelectItem>
                     <SelectItem value="admin">Admin (District Admin)</SelectItem>
+                    <SelectItem value="BPM">BPM(Block Programme Manager)</SelectItem>
+                    <SelectItem value="DPM">DPM(District Programme Manager)</SelectItem>
+                    <SelectItem value="AC">AC(Area Coordinator)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
