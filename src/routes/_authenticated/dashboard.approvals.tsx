@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-auth";
 import { useT } from "@/lib/i18n";
+import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/dashboard/approvals")({
   component: ApprovalsPage,
@@ -202,7 +203,7 @@ function ApprovalsPage() {
         `गतिविधि ${decision === "Approved" ? "स्वीकृत" : "अस्वीकृत"} की गई / Activity ${decision}`,
       );
       refetchActivities();
-      qc.invalidateQueries({ queryKey: ["dash-stats-raw"] });
+      invalidateConsistencyQueries(qc);
     } catch (err: any) {
       console.error("Approvals handleDecision error details:", err);
       toast.error(`Error: ${err.message || "Unknown error"}${err.details ? ` (${err.details})` : ""}`);
@@ -227,7 +228,7 @@ function ApprovalsPage() {
 
       toast.success("उपस्थिति सत्यापन स्वीकृत / Attendance verification approved");
       refetchVerifications();
-      qc.invalidateQueries({ queryKey: ["dash-stats-raw"] });
+      invalidateConsistencyQueries(qc);
     } catch (err: any) {
       console.error("Approvals handleApproveVerification error details:", err);
       toast.error(`Error: ${err.message || "Unknown error"}${err.details ? ` (${err.details})` : ""}`);
@@ -252,7 +253,7 @@ function ApprovalsPage() {
 
       toast.warning("उपस्थिति सत्यापन अस्वीकृत / Attendance verification rejected");
       refetchVerifications();
-      qc.invalidateQueries({ queryKey: ["dash-stats-raw"] });
+      invalidateConsistencyQueries(qc);
     } catch (err: any) {
       console.error("Approvals handleRejectVerification error details:", err);
       toast.error(`Error: ${err.message || "Unknown error"}${err.details ? ` (${err.details})` : ""}`);

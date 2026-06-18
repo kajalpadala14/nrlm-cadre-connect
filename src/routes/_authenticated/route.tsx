@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/app/AppSidebar";
 import { useT } from "@/lib/i18n";
 import { User, Languages } from "lucide-react";
 import { useProfile, highestRole } from "@/hooks/use-auth";
+import { useUniversalConsistencySync } from "@/hooks/use-activity-cache-sync";
 
 // Routes under /dashboard/* require admin or block_officer.
 // Routes under /cadre/* require cadre role.
@@ -72,6 +73,7 @@ function AuthedLayout() {
   const { t, lang, toggleLang } = useT();
   const { data: profile } = useProfile();
   const role = highestRole(profile?.roles ?? []);
+  useUniversalConsistencySync();
 
   return (
     <SidebarProvider>

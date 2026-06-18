@@ -109,7 +109,7 @@ function Overview() {
       const other = allActs?.filter((a) => a.activity_type === "Other").length ?? 0;
 
       // 4. Activities submitted today (on dateStr)
-      let actTodayQ = supabase.from("activities").select("cadre_id, village_name, photo_url");
+      let actTodayQ = supabase.from("activities").select("cadre_id, village_name, panchayat, photo_url");
       if (blockId !== "all") {
         actTodayQ = actTodayQ.eq("block_id", blockId);
       }
@@ -117,6 +117,7 @@ function Overview() {
       const { data: actTodayRows } = await actTodayQ;
 
       const villagesToday = new Set((actTodayRows ?? []).map((r) => r.village_name));
+      const panchayatsToday = new Set((actTodayRows ?? []).map((r) => r.panchayat).filter(Boolean));
       const evidenceUploadedToday = actTodayRows?.filter((r) => r.photo_url).length ?? 0;
 
       // 5. Fetch actual pending activities list for the sidebar
@@ -328,6 +329,7 @@ function Overview() {
         leaveCount: leaveCount,
         activitiesToday: actTodayRows?.length ?? 0,
         villagesToday: villagesToday.size,
+        panchayatsToday: panchayatsToday.size,
         evidenceUploadedToday,
         totalActivities,
         pendingActivities,
@@ -341,6 +343,7 @@ function Overview() {
         other,
         pendingActivitiesList: formattedPendingList,
         blocksList,
+        totalBlocks: blocksData?.length ?? 0,
         formattedRecent,
       };
     },
@@ -352,6 +355,9 @@ function Overview() {
     inactiveToday: dbStats?.inactiveToday ?? 0,
     leaveCount: dbStats?.leaveCount ?? 0,
     villagesCovered: dbStats?.villagesToday ?? 0,
+    panchayatsCovered: dbStats?.panchayatsToday ?? 0,
+    blocksCovered: dbStats?.blocksList?.filter((b) => b.activities > 0 || b.total > 0).length ?? 0,
+    totalBlocks: dbStats?.totalBlocks ?? 0,
     evidenceUploaded: dbStats?.evidenceUploadedToday ?? 0,
     pendingApprovals: dbStats?.pendingActivities ?? 0,
     activitiesSubmitted: dbStats?.activitiesToday ?? 0,
@@ -869,13 +875,17 @@ function Overview() {
                     <span className="text-slate-500 font-semibold">
                       Blocks Covered / ब्लॉक कवरेज
                     </span>
-                    <span className="font-bold text-slate-800">5 / 5 Blocks</span>
+                    <span className="font-bold text-slate-800">
+                      {stats.blocksCovered} / {stats.totalBlocks} Blocks
+                    </span>
                   </div>
                   <div className="flex items-center justify-between border-b border-slate-50 pb-1.5">
                     <span className="text-slate-500 font-semibold">
                       Panchayats Covered / पंचायत कवरेज
                     </span>
-                    <span className="font-bold text-slate-800">42 Panchayats</span>
+                    <span className="font-bold text-slate-800">
+                      {stats.panchayatsCovered} Panchayats
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 font-semibold">
@@ -889,7 +899,9 @@ function Overview() {
               </div>
               <div className="bg-blue-50/50 text-blue-700 rounded-xl p-2.5 text-[10px] font-bold flex items-center gap-2 border border-blue-100 mt-2">
                 <Globe2 className="h-4 w-4 shrink-0 text-blue-500" />
-                <span>Fully mapped across Dantewada blocks: Dantewada, Geedam, Kuakonda, Katekalyan.</span>
+                <span>
+                  Live coverage is derived from submitted activity locations and registered blocks.
+                </span>
               </div>
             </div>
           </div>

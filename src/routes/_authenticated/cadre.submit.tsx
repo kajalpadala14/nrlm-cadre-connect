@@ -30,6 +30,7 @@ import { useProfile } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { cn } from "@/lib/utils";
+import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 
 type ActivityType = Database["public"]["Enums"]["activity_type"];
 
@@ -679,34 +680,11 @@ function SubmitPage() {
       // 5. Auto-attendance marking (only when a photo was uploaded)
       if (autoAttendance && photoUrl) {
         try {
-          const { data: existingAttendance } = await supabase
-            .from("attendance")
-            .select("id, status")
-            .eq("cadre_id", profile.id)
-            .eq("date", actDate)
-            .maybeSingle();
-
-          if (existingAttendance) {
-            if (existingAttendance.status !== "present") {
-              await supabase
-                .from("attendance")
-                .update({
-                  status: "present" as const,
-                  check_in_at: new Date().toISOString(),
-                  recorded_by: profile.id,
-                })
-                .eq("id", existingAttendance.id);
-            }
-          } else {
-            await supabase.from("attendance").insert({
-              cadre_id: profile.id,
-              block_id: blockId,
-              date: actDate,
-              status: "present" as const,
-              check_in_at: new Date().toISOString(),
-              recorded_by: profile.id,
-            });
-          }
+          const { error: attendanceError } = await (supabase.rpc as any)(
+            "mark_activity_attendance",
+            { p_activity_id: insertedActivity.id },
+          );
+          if (attendanceError) throw attendanceError;
           toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
           console.log("Attendance insert completed");
         } catch (attErr) {
@@ -716,7 +694,7 @@ function SubmitPage() {
         toast.info("फोटो के बिना सबमिट किया गया — उपस्थिति मार्क नहीं की गई / Submitted without photo — attendance not marked");
       }
 
-      await qc.invalidateQueries({ queryKey: ["my-activities"] });
+      invalidateConsistencyQueries(qc);
       toast.success(t("submission_success"));
       navigate({ to: "/cadre/history" });
     } catch (err: unknown) {
@@ -742,7 +720,7 @@ function SubmitPage() {
         }
 
         // 1. Insert activity
-        const { error: actErr } = await supabase.from("activities").insert({
+        const { data: insertedDraftActivity, error: actErr } = await supabase.from("activities").insert({
           cadre_id: draft.cadre_id,
           activity_date: draft.activity_date,
           block_id: draft.block_id,
@@ -753,44 +731,21 @@ function SubmitPage() {
           activity_type: draft.activity_type,
           description: draft.description,
           status: draft.status || "Pending",
-        });
+        }).select("id").single();
         if (actErr) throw actErr;
 
       // 2. Mark attendance — skip pending_verification (not a valid enum value)
       // Only mark present if there's photo evidence
-      if (draft.photo_url) {
-        const { data: existingAttendance } = await supabase
-          .from("attendance")
-          .select("id, status")
-          .eq("cadre_id", draft.cadre_id)
-          .eq("date", draft.activity_date)
-          .maybeSingle();
-
-        if (existingAttendance) {
-          if (existingAttendance.status !== "present") {
-            await supabase
-              .from("attendance")
-              .update({
-                status: "present" as const,
-                check_in_at: new Date().toISOString(),
-                recorded_by: draft.cadre_id,
-              })
-              .eq("id", existingAttendance.id);
-          }
-        } else {
-          await supabase.from("attendance").insert({
-            cadre_id: draft.cadre_id,
-            block_id: draft.block_id,
-            date: draft.activity_date,
-            status: "present" as const,
-            check_in_at: new Date().toISOString(),
-            recorded_by: draft.cadre_id,
-          });
-        }
+      if (draft.photo_url && insertedDraftActivity?.id) {
+        const { error: attendanceError } = await (supabase.rpc as any)(
+          "mark_activity_attendance",
+          { p_activity_id: insertedDraftActivity.id },
+        );
+        if (attendanceError) throw attendanceError;
       }
       }
       saveDraftsToLocalStorage([]);
-      await qc.invalidateQueries({ queryKey: ["my-activities"] });
+      invalidateConsistencyQueries(qc);
       toast.success("सभी ड्राफ्ट सिंक हो गए और उपस्थिति सत्यापन लंबित है / All offline drafts synced and attendance verification set to pending");
     } catch (e: any) {
       console.error(e);

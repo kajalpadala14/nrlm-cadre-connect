@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
   List,
@@ -33,6 +33,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useProfile } from "@/hooks/use-auth";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/dashboard/evidence")({
   component: EvidencePage,
@@ -54,6 +55,7 @@ function EvidencePage() {
 
   const { data: adminProfile } = useProfile();
   const { t } = useT();
+  const qc = useQueryClient();
 
   const { data: blocks } = useQuery({
     queryKey: ["blocks"],
@@ -92,8 +94,8 @@ function EvidencePage() {
           block: (a.blocks as any)?.name || "Unknown Block",
           block_id: a.block_id || "",
           status: (a.status as string) || "Pending",
-          latitude: 20.27,
-          longitude: 81.25,
+          latitude: null as number | null,
+          longitude: null as number | null,
           description: a.description || "",
           num_beneficiaries: a.beneficiaries || 0,
           pdf_url: a.pdf_url || "",
@@ -167,6 +169,7 @@ function EvidencePage() {
       toast.success(`${selectedIds.length} साक्ष्य ${decision === "Approved" ? "स्वीकृत" : "अस्वीकृत"} / Bulk ${decision}`);
       setSelectedIds([]);
       refetchEvidence();
+      invalidateConsistencyQueries(qc);
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);
     }
@@ -251,6 +254,7 @@ function EvidencePage() {
       setActivePhoto(null);
       setReviewComment("");
       refetchEvidence();
+      invalidateConsistencyQueries(qc);
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);
     }
@@ -414,14 +418,6 @@ function EvidencePage() {
                     {b.name}
                   </SelectItem>
                 ))}
-                {(blocks ?? []).length === 0 && (
-                  <>
-                    <SelectItem value="dantewada-mock">Dantewada</SelectItem>
-                    <SelectItem value="geedam-mock">Geedam</SelectItem>
-                    <SelectItem value="kuakonda-mock">Kuakonda</SelectItem>
-                    <SelectItem value="katekalyan-mock">Katekalyan</SelectItem>
-                  </>
-                )}
               </SelectContent>
             </Select>
           </div>
@@ -810,7 +806,7 @@ function EvidencePage() {
                   <div className="w-full h-full min-h-[250px] flex flex-col items-center justify-center bg-slate-900 border border-slate-800 rounded-lg p-4 relative">
                     <div
                       className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-800 shadow cursor-pointer hover:scale-105 transition-transform"
-                      onClick={() => toast.info("वीडियो लोड हो रहा है... / Play mock video")}
+                      onClick={() => toast.info("वीडियो लोड हो रहा है... / Loading video")}
                     >
                       <span className="ml-1 text-sm">▶</span>
                     </div>
@@ -882,7 +878,9 @@ function EvidencePage() {
                         GPS Geotag coords
                       </span>
                       <span className="text-slate-600 font-bold">
-                        {activePhoto.latitude.toFixed(4)}, {activePhoto.longitude.toFixed(4)}
+                        {typeof activePhoto.latitude === "number" && typeof activePhoto.longitude === "number"
+                          ? `${activePhoto.latitude.toFixed(4)}, ${activePhoto.longitude.toFixed(4)}`
+                          : "N/A"}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">

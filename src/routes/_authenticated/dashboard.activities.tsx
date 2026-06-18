@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useT } from "@/lib/i18n";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,7 +43,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { BarChart3, Search, Calendar, Landmark } from "lucide-react";
-import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
+import { invalidateConsistencyQueries, useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 
 export const Route = createFileRoute("/_authenticated/dashboard/activities")({
   component: ActivitiesPage,
@@ -78,6 +78,7 @@ const isAllowedImageFile = (file: File) => {
 
 function ActivitiesPage() {
   const { t } = useT();
+  const qc = useQueryClient();
   const { data: profile } = useProfile();
   useActivityCacheSync();
   const role = highestRole(profile?.roles ?? []);
@@ -113,7 +114,7 @@ function ActivitiesPage() {
   const [actType, setActType] = useState("SHG Meeting");
   const [description, setDescription] = useState("");
   const [beneficiaryCount, setBeneficiaryCount] = useState(0);
-  const [gpsLocation, setGpsLocation] = useState("20.2706° N, 81.2507° E (Locked)");
+  const [gpsLocation, setGpsLocation] = useState("");
   const [autoAttendance, setAutoAttendance] = useState(true);
 
   // Attachments States
@@ -395,7 +396,7 @@ function ActivitiesPage() {
           village_name: village.trim(),
           panchayat: panchayat.trim(),
           beneficiaries: beneficiaryCount,
-          gps: gpsLocation,
+          gps: gpsLocation || null,
           activity_type: ACTIVITY_MAP_LOCAL[actType] ?? "Other",
           description: description.trim() || null,
           photo_url: photoUrl,
@@ -422,35 +423,15 @@ function ActivitiesPage() {
 
       // 3. Auto-attendance marking
       if (autoAttendance) {
-        const { data: existingAttendance } = await supabase
-          .from("attendance")
-          .select("id")
-          .eq("cadre_id", profile.id)
-          .eq("date", actDate)
-          .maybeSingle();
-
-        if (existingAttendance) {
-          await supabase
-            .from("attendance")
-            .update({
-              status: "present",
-              check_in_at: new Date().toISOString(),
-              recorded_by: profile.id,
-            })
-            .eq("id", existingAttendance.id);
-        } else {
-          await supabase.from("attendance").insert({
-            cadre_id: profile.id,
-            block_id: selectedBlockId,
-            date: actDate,
-            status: "present",
-            check_in_at: new Date().toISOString(),
-            recorded_by: profile.id,
-          });
-        }
+        const { error: attendanceError } = await (supabase.rpc as any)(
+          "mark_activity_attendance",
+          { p_activity_id: insertedActivity.id },
+        );
+        if (attendanceError) throw attendanceError;
       }
 
       await refetchActivities();
+      invalidateConsistencyQueries(qc);
       toast.success(t("submission_success"));
       if (autoAttendance) {
         toast.success(t("auto_attendance"));
@@ -499,7 +480,7 @@ function ActivitiesPage() {
           village_name: draft.village,
           panchayat: draft.panchayat,
           beneficiaries: draft.beneficiaries,
-          gps: gpsLocation,
+          gps: gpsLocation || null,
           activity_type: ACTIVITY_MAP_LOCAL[draft.activity_type] ?? "Other",
           description: draft.description,
           status: "Pending",
@@ -1344,7 +1325,9 @@ function ActivitiesPage() {
                   <p className="text-[10px] font-bold text-slate-400 uppercase leading-none">
                     Auto-tagged Geotag Coordinates
                   </p>
-                  <p className="text-xs font-black text-slate-700 mt-1">{gpsLocation}</p>
+                  <p className="text-xs font-black text-slate-700 mt-1">
+                    {gpsLocation || "N/A"}
+                  </p>
                 </div>
               </div>
 

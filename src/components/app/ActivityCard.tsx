@@ -67,16 +67,18 @@ export function ActivityCard({
   const [savingEdit, setSavingEdit] = useState(false);
 
   const { data: attendanceRecord, refetch: refetchAttendance } = useQuery({
-    queryKey: ["attendance-status", activity.activity_date],
+    queryKey: ["attendance-status", activity.cadre_id, activity.activity_date],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("attendance")
         .select("id, status")
-        .eq("date", activity.activity_date)
-        .maybeSingle();
+        .eq("date", activity.activity_date);
+      if (activity.cadre_id) query = query.eq("cadre_id", activity.cadre_id);
+      const { data, error } = await query.maybeSingle();
       if (error) throw error;
       return data;
     },
+    enabled: Boolean(activity.activity_date && activity.cadre_id),
   });
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,25 +109,21 @@ export function ActivityCard({
         .eq("id", activity.id);
       if (actError) throw actError;
 
-      if (attendanceRecord?.id) {
-        const { error: attError } = await supabase
-          .from("attendance")
-          .update({ status: "present", check_in_at: new Date().toISOString() })
-          .eq("id", attendanceRecord.id);
-        if (attError) throw attError;
-      } else {
-        const { error: attError } = await supabase
-          .from("attendance")
-          .insert({
-            cadre_id: userId,
-            block_id: activity.block_id || profile?.block_id,
-            date: activity.activity_date,
-            status: "present",
-            check_in_at: new Date().toISOString(),
-            recorded_by: userId,
-          });
-        if (attError) throw attError;
-      }
+      const { error: evidenceError } = await supabase.from("evidence_files").insert({
+        activity_id: activity.id,
+        cadre_id: userId,
+        storage_path: uploadData?.path ?? filePath,
+        public_url: publicUrl,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || null,
+      });
+      if (evidenceError) throw evidenceError;
+
+      const { error: attError } = await (supabase.rpc as any)("mark_activity_attendance", {
+        p_activity_id: activity.id,
+      });
+      if (attError) throw attError;
 
       toast.success("फोटो साक्ष्य अपलोड किया गया और उपस्थिति 'उपस्थित' मार्क की गई / Photo uploaded and attendance marked Present!");
       refetchAttendance();
@@ -196,24 +194,6 @@ export function ActivityCard({
         .delete()
         .eq("id", activity.id);
       if (error) throw error;
-
-      // Clean up attendance record if no other activities exist for this day
-      const userId = profile?.id || activity.cadre_id;
-      if (userId) {
-        const { data: otherActs } = await supabase
-          .from("activities")
-          .select("id")
-          .eq("cadre_id", userId)
-          .eq("activity_date", activity.activity_date);
-
-        if (!otherActs || otherActs.length === 0) {
-          await supabase
-            .from("attendance")
-            .delete()
-            .eq("cadre_id", userId)
-            .eq("date", activity.activity_date);
-        }
-      }
 
       toast.success("गतिविधि सफलतापूर्वक हटा दी गई / Activity deleted successfully!");
       setOpenDetailsDialog(false);
