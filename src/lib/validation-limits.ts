@@ -1,0 +1,1 @@
+export const CADRE_LOCATION_MAX_LENGTH = 500;

@@ -25,6 +25,7 @@ import { useT } from "@/lib/i18n";
 import { useProfile, highestRole } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { createUser, deleteUser, resetUserPin } from "@/lib/admin.functions";
+import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
 
 export const Route = createFileRoute("/_authenticated/dashboard/users")({
   component: UsersPage,
@@ -258,6 +259,16 @@ function UsersPage() {
       toast.error(t("toast_phone_digits"));
       return;
     }
+    const village = form.village.trim();
+    const panchayat = form.panchayat.trim();
+    if (village.length > CADRE_LOCATION_MAX_LENGTH) {
+      toast.error(`Village must be ${CADRE_LOCATION_MAX_LENGTH} characters or fewer.`);
+      return;
+    }
+    if (panchayat.length > CADRE_LOCATION_MAX_LENGTH) {
+      toast.error(`Panchayat must be ${CADRE_LOCATION_MAX_LENGTH} characters or fewer.`);
+      return;
+    }
 
     cadreSaveInFlightRef.current = true;
     setIsCadreSaving(true);
@@ -274,8 +285,8 @@ function UsersPage() {
             phone: form.phone || null,
             cadre_type: form.role as any,
             block_id: form.block_id || null,
-            village: form.village || null,
-            panchayat: form.panchayat || null,
+            village: village || null,
+            panchayat: panchayat || null,
             gender: form.gender || null,
             join_date: form.join_date || null,
             status: form.status || null,
@@ -318,8 +329,8 @@ function UsersPage() {
             role: "cadre",
             cadre_type: form.role as any,
             block_id: form.block_id || null,
-            village: form.village || null,
-            panchayat: form.panchayat || null,
+            village: village || null,
+            panchayat: panchayat || null,
             gender: form.gender || null,
             join_date: form.join_date || null,
             status: form.status || null,
@@ -1058,6 +1069,7 @@ function UsersPage() {
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">{t("panchayat_field")}</Label>
                 <Input
+                  maxLength={CADRE_LOCATION_MAX_LENGTH}
                   value={form.panchayat}
                   onChange={(e) => setForm({ ...form, panchayat: e.target.value })}
                   placeholder="e.g. Kalnar"
@@ -1069,6 +1081,7 @@ function UsersPage() {
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">{t("village_field")}</Label>
                 <Input
+                  maxLength={CADRE_LOCATION_MAX_LENGTH}
                   value={form.village}
                   onChange={(e) => setForm({ ...form, village: e.target.value })}
                   placeholder="e.g. Reslapur"

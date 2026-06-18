@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
 import { z } from "zod";
 
 const userIdSchema = z
@@ -79,8 +80,8 @@ const createUserInput = z.object({
     .nullable()
     .optional(),
   block_id: z.string().uuid().nullable().optional(),
-  village: z.string().trim().min(1).max(120).nullable().optional(),
-  panchayat: z.string().trim().max(120).nullable().optional(),
+  village: z.string().trim().min(1).max(CADRE_LOCATION_MAX_LENGTH).nullable().optional(),
+  panchayat: z.string().trim().max(CADRE_LOCATION_MAX_LENGTH).nullable().optional(),
   gender: z.string().trim().max(20).nullable().optional(),
   join_date: z.string().trim().nullable().optional(),
   status: z.enum(["Active", "Inactive"]).nullable().optional(),
