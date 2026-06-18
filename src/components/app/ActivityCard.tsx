@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { invalidateActivityQueries } from "@/hooks/use-activity-cache-sync";
+import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
 
 export interface ActivityCardData {
   id: string;
@@ -62,6 +63,7 @@ export function ActivityCard({
   const [openEditDialog, setOpenEditDialog] = useState(false);
   const [openDetailsDialog, setOpenDetailsDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingPhoto, setDeletingPhoto] = useState(false);
   const [editDesc, setEditDesc] = useState(activity.description || "");
   const [editBeneficiaries, setEditBeneficiaries] = useState(activity.beneficiaries || 0);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -79,6 +81,20 @@ export function ActivityCard({
       return data;
     },
     enabled: Boolean(activity.activity_date && activity.cadre_id),
+  });
+
+  const { data: evidenceFiles = [], refetch: refetchEvidenceFiles } = useQuery({
+    queryKey: ["activity-evidence-files", activity.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("evidence_files")
+        .select("id, storage_path, public_url, mime_type, created_at")
+        .eq("activity_id", activity.id)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: Boolean(activity.id),
   });
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,6 +180,33 @@ export function ActivityCard({
     }
   };
 
+  const deleteActivityRecord = async () => {
+    const { error } = await (supabase.rpc as any)("delete_activity_with_consistency", {
+      p_activity_id: activity.id,
+    });
+
+    if (!error) return;
+
+    const missingRpc =
+      error.code === "PGRST202" ||
+      error.message?.includes("delete_activity_with_consistency") ||
+      error.message?.includes("schema cache");
+
+    if (!missingRpc) {
+      throw error;
+    }
+
+    console.warn("[ActivityCard] delete_activity_with_consistency RPC unavailable; using direct delete fallback.");
+    const { error: deleteError } = await supabase
+      .from("activities")
+      .delete()
+      .eq("id", activity.id);
+
+    if (deleteError) {
+      throw deleteError;
+    }
+  };
+
   const handleDeleteActivity = async () => {
     if (!confirm("क्या आप वाकई इस गतिविधि को हटाना चाहते हैं? / Are you sure you want to delete this activity?")) return;
     setDeleting(true);
@@ -189,11 +232,7 @@ export function ActivityCard({
         }
       }
 
-      const { error } = await supabase
-        .from("activities")
-        .delete()
-        .eq("id", activity.id);
-      if (error) throw error;
+      await deleteActivityRecord();
 
       toast.success("गतिविधि सफलतापूर्वक हटा दी गई / Activity deleted successfully!");
       setOpenDetailsDialog(false);
@@ -203,6 +242,37 @@ export function ActivityCard({
       toast.error(`हटाने में विफल / Deletion failed: ${err.message}`);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    const photoEvidence =
+      evidenceFiles.find((file) => file.public_url === activity.photo_url) ??
+      evidenceFiles.find((file) => file.mime_type?.startsWith("image/"));
+
+    if (!photoEvidence) {
+      toast.error("Photo metadata was not found. Please refresh and try again.");
+      return;
+    }
+
+    if (!confirm("Delete this photo evidence? Auto attendance will be removed if no photos remain.")) {
+      return;
+    }
+
+    setDeletingPhoto(true);
+    try {
+      await deleteEvidenceWithConsistency(
+        { id: photoEvidence.id, storage_path: photoEvidence.storage_path },
+        qc,
+      );
+      toast.success("Photo deleted. Attendance was revalidated.");
+      await refetchEvidenceFiles();
+      await refetchAttendance();
+      if (onRefetchHistory) onRefetchHistory();
+    } catch (err: any) {
+      toast.error(`Photo delete failed: ${err.message || err}`);
+    } finally {
+      setDeletingPhoto(false);
     }
   };
 
@@ -374,7 +444,7 @@ export function ActivityCard({
                 className="h-32 w-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
             </a>
-            <div className="flex justify-start">
+            <div className="flex flex-wrap gap-2">
               <a
                 href={signedUrl}
                 download={`evidence_${activity.id}`}
@@ -385,6 +455,18 @@ export function ActivityCard({
                 <Download className="h-3.5 w-3.5" />
                 साक्ष्य डाउनलोड करें / Download Evidence
               </a>
+              {activityStatus === "Pending" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={deletingPhoto}
+                  onClick={handleDeletePhoto}
+                  className="h-7 rounded-lg border-rose-200 bg-rose-50 text-[10px] font-black text-rose-600 hover:bg-rose-100"
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  Delete Photo
+                </Button>
+              )}
             </div>
           </div>
         ) : (
@@ -628,6 +710,18 @@ export function ActivityCard({
                         >
                           <Download className="h-3 w-3" /> Download Photo
                         </a>
+                        {activityStatus === "Pending" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={deletingPhoto}
+                            onClick={handleDeletePhoto}
+                            className="h-7 rounded-lg border-rose-200 bg-rose-50 text-[10px] font-black text-rose-600 hover:bg-rose-100"
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                            Delete Photo
+                          </Button>
+                        )}
                       </div>
                     ) : (
                       <div className="h-28 w-full animate-pulse rounded-xl bg-slate-50" />

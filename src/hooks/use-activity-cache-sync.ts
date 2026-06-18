@@ -40,6 +40,7 @@ const QUERY_PREFIXES = [
 
 const TABLES_TO_WATCH = [
   "activities",
+  "activity_attendance_links",
   "activity_approvals",
   "attendance",
   "evidence_files",

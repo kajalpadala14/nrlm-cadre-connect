@@ -422,19 +422,23 @@ function ActivitiesPage() {
       }
 
       // 3. Auto-attendance marking
+      let attendanceMarked = false;
       if (autoAttendance) {
-        const { error: attendanceError } = await (supabase.rpc as any)(
+        const { data: attendanceId, error: attendanceError } = await (supabase.rpc as any)(
           "mark_activity_attendance",
           { p_activity_id: insertedActivity.id },
         );
         if (attendanceError) throw attendanceError;
+        attendanceMarked = Boolean(attendanceId);
       }
 
       await refetchActivities();
       invalidateConsistencyQueries(qc);
       toast.success(t("submission_success"));
-      if (autoAttendance) {
+      if (attendanceMarked) {
         toast.success(t("auto_attendance"));
+      } else if (autoAttendance) {
+        toast.info("Photo evidence is required before auto attendance can be marked.");
       }
 
       // Reset Form

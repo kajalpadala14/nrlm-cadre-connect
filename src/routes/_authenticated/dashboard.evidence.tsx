@@ -16,6 +16,7 @@ import {
   X,
   Share2,
   Building,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ import { useProfile } from "@/hooks/use-auth";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
+import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
 
 export const Route = createFileRoute("/_authenticated/dashboard/evidence")({
   component: EvidencePage,
@@ -70,20 +72,36 @@ function EvidencePage() {
     isLoading: isLoadingEvidence,
     refetch: refetchEvidence,
   } = useQuery({
-    queryKey: ["evidence-gallery", blocks],
+    queryKey: ["evidence-gallery"],
     queryFn: async () => {
-      const { data: activities, error } = await supabase
-        .from("activities")
-        .select("*, profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type), blocks(name)")
-        .order("submitted_at", { ascending: false });
+      const { data: evidenceRows, error } = await supabase
+        .from("evidence_files")
+        .select("id, activity_id, cadre_id, storage_path, public_url, mime_type, latitude, longitude, created_at")
+        .like("mime_type", "image/%")
+        .order("created_at", { ascending: false });
       if (error) throw error;
 
-      const filtered = (activities ?? []).filter((a) => !!a.photo_url);
+      const activityIds = Array.from(new Set((evidenceRows ?? []).map((e) => e.activity_id)));
+      if (activityIds.length === 0) return [];
 
-      return filtered.map((a) => ({
+      const { data: activities, error: actError } = await supabase
+        .from("activities")
+        .select("*, profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type), blocks(name)")
+        .in("id", activityIds);
+      if (actError) throw actError;
+
+      const activityMap = new Map((activities ?? []).map((activity) => [activity.id, activity]));
+
+      return (evidenceRows ?? []).flatMap((evidence) => {
+        const a = activityMap.get(evidence.activity_id);
+        if (!a) return [];
+
+        return [{
           id: a.id,
+          evidence_id: evidence.id,
           cadre_id: a.cadre_id,
-          url: a.photo_url || "",
+          storage_path: evidence.storage_path,
+          url: evidence.public_url || "",
           caption: a.description || a.activity_type.replace(/_/g, " "),
           cadre_name: (a.profiles as any)?.full_name || "Unknown Cadre",
           role: (a.profiles as any)?.cadre_type || "PRP",
@@ -94,13 +112,14 @@ function EvidencePage() {
           block: (a.blocks as any)?.name || "Unknown Block",
           block_id: a.block_id || "",
           status: (a.status as string) || "Pending",
-          latitude: null as number | null,
-          longitude: null as number | null,
+          latitude: evidence.latitude,
+          longitude: evidence.longitude,
           description: a.description || "",
           num_beneficiaries: a.beneficiaries || 0,
           pdf_url: a.pdf_url || "",
           isVideo: false,
-        }));
+        }];
+      });
     },
     enabled: true,
   });
@@ -257,6 +276,30 @@ function EvidencePage() {
       invalidateConsistencyQueries(qc);
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);
+    }
+  };
+
+  const handleDeletePhoto = async (photo: any) => {
+    if (!photo?.evidence_id) {
+      toast.error("Photo metadata was not found. Please refresh and try again.");
+      return;
+    }
+    if (!confirm("Delete this photo? Auto attendance will be removed if no photos remain for this activity.")) {
+      return;
+    }
+
+    try {
+      await deleteEvidenceWithConsistency(
+        { id: photo.evidence_id, storage_path: photo.storage_path ?? null },
+        qc,
+      );
+      toast.success("Photo deleted. Attendance was revalidated.");
+      setActivePhoto(null);
+      setSelectedIds((prev) => prev.filter((id) => id !== photo.id));
+      refetchEvidence();
+      invalidateConsistencyQueries(qc);
+    } catch (err: any) {
+      toast.error(`Photo delete failed: ${err.message || err}`);
     }
   };
 
@@ -535,6 +578,19 @@ function EvidencePage() {
                       <span className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
                         {photo.type}
                       </span>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDeletePhoto(photo);
+                        }}
+                        className="absolute top-2 right-2 h-8 w-8 p-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete photo"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
 
                     {/* Meta Info */}
@@ -647,6 +703,18 @@ function EvidencePage() {
                           </div>
                         </div>
                       </div>
+                      <div className="flex justify-end border-t border-slate-100 pt-2">
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDeletePhoto(photo)}
+                          className="h-8 rounded-lg text-[11px] font-bold"
+                        >
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          Delete Photo
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}
@@ -681,6 +749,7 @@ function EvidencePage() {
                         <th className="py-2.5">{t("col_type2")}</th>
                         <th className="py-2.5">{t("col_date2")}</th>
                         <th className="py-2.5">{t("col_status2")}</th>
+                        <th className="py-2.5 pr-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -739,6 +808,18 @@ function EvidencePage() {
                               >
                                 {photo.status}
                               </span>
+                            </td>
+                            <td className="py-3 pr-4 text-right">
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDeletePhoto(photo)}
+                                className="h-8 w-8 p-0 rounded-lg"
+                                title="Delete photo"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </td>
                           </tr>
                         );
@@ -940,6 +1021,14 @@ function EvidencePage() {
                     title="Share link"
                   >
                     <Share2 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    onClick={() => handleDeletePhoto(activePhoto)}
+                    variant="destructive"
+                    className="h-9 w-9 p-0 rounded-lg shrink-0"
+                    title="Delete photo"
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
 
                   {activePhoto.status === "Pending" ? (

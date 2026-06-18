@@ -12,6 +12,7 @@ import {
   FileText,
   MapPin,
   Users,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-auth";
 import { useT } from "@/lib/i18n";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
+import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
 
 export const Route = createFileRoute("/_authenticated/dashboard/approvals")({
   component: ApprovalsPage,
@@ -34,7 +36,7 @@ function ApprovalsPage() {
   const { data: adminProfile } = useProfile();
   const [workspaceTab, setWorkspaceTab] = useState<"activities" | "attendance">("activities");
   const [comments, setComments] = useState<Record<string, string>>({});
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<any | null>(null);
   const [filterStatus, setFilterStatus] = useState<"All" | "Pending" | "Approved" | "Rejected">(
     "Pending",
   );
@@ -53,7 +55,8 @@ function ApprovalsPage() {
         .order("submitted_at", { ascending: false });
       if (actError) throw actError;
 
-      const cadreIds = Array.from(new Set(activities.map((a) => a.cadre_id)));
+      const activityRows = activities ?? [];
+      const cadreIds = Array.from(new Set(activityRows.map((a) => a.cadre_id)));
       if (cadreIds.length === 0) return [];
 
       const { data: profiles, error: profError } = await supabase
@@ -65,13 +68,31 @@ function ApprovalsPage() {
       const { data: blocks, error: blockError } = await supabase.from("blocks").select("id, name");
       if (blockError) throw blockError;
 
+      const activityIds = activityRows.map((a) => a.id);
+      const { data: evidenceFiles, error: evidenceError } = await supabase
+        .from("evidence_files")
+        .select("id, activity_id, storage_path, public_url, mime_type, created_at")
+        .in("activity_id", activityIds)
+        .like("mime_type", "image/%")
+        .order("created_at", { ascending: true });
+      if (evidenceError) throw evidenceError;
+
       const profileMap = new Map(profiles.map((p) => [p.id, p]));
       const blockMap = new Map(blocks.map((b) => [b.id, b.name]));
+      const evidenceMap = new Map<string, any>();
+      (evidenceFiles ?? []).forEach((file) => {
+        if (!evidenceMap.has(file.activity_id)) {
+          evidenceMap.set(file.activity_id, file);
+        }
+      });
 
-      return activities.map((a) => {
+      return activityRows.map((a) => {
         const prof = profileMap.get(a.cadre_id);
+        const evidence = evidenceMap.get(a.id);
         return {
           id: a.id,
+          evidence_id: evidence?.id ?? null,
+          storage_path: evidence?.storage_path ?? null,
           cadre_id: a.cadre_id,
           block_id: a.block_id,
           cadre_name: prof?.full_name || "Unknown Cadre",
@@ -82,7 +103,7 @@ function ApprovalsPage() {
           activity_type: a.activity_type,
           description: a.description || "",
           beneficiaries: a.beneficiaries || 0,
-          photo: a.photo_url || "",
+          photo: evidence?.public_url || a.photo_url || "",
           pdf: a.pdf_url || "",
           status: a.status as "Pending" | "Approved" | "Rejected",
           comment: a.comment || "",
@@ -207,6 +228,29 @@ function ApprovalsPage() {
     } catch (err: any) {
       console.error("Approvals handleDecision error details:", err);
       toast.error(`Error: ${err.message || "Unknown error"}${err.details ? ` (${err.details})` : ""}`);
+    }
+  };
+
+  const handleDeletePhoto = async (item: any) => {
+    if (!item?.evidence_id) {
+      toast.error("Photo metadata was not found. Please refresh and try again.");
+      return;
+    }
+    if (!confirm("Delete this photo? Auto attendance will be removed if no photos remain for this activity.")) {
+      return;
+    }
+
+    try {
+      await deleteEvidenceWithConsistency(
+        { id: item.evidence_id, storage_path: item.storage_path ?? null },
+        qc,
+      );
+      toast.success("Photo deleted. Attendance was revalidated.");
+      setSelectedPhoto(null);
+      refetchActivities();
+      invalidateConsistencyQueries(qc);
+    } catch (err: any) {
+      toast.error(`Photo delete failed: ${err.message || err}`);
     }
   };
 
@@ -369,7 +413,7 @@ function ApprovalsPage() {
                       )}
                       {item.photo && (
                         <button
-                          onClick={() => setSelectedPhoto(item.photo)}
+                          onClick={() => setSelectedPhoto(item)}
                           className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1 rounded-xl"
                         >
                           <Eye className="h-4 w-4" />
@@ -377,6 +421,18 @@ function ApprovalsPage() {
                         </button>
                       )}
                     </div>
+                    {item.photo && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeletePhoto(item)}
+                        className="h-8 rounded-lg text-[11px] font-bold"
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        Delete Photo
+                      </Button>
+                    )}
                   </div>
 
                   {/* Middle Col: Description details */}
@@ -596,14 +652,26 @@ function ApprovalsPage() {
 
       {/* Lightbox photo modal */}
       <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
-        <DialogContent className="max-w-lg p-0 overflow-hidden bg-slate-950 flex flex-col justify-center items-center aspect-square border-none shadow-2xl">
+        <DialogContent className="relative max-w-lg p-0 overflow-hidden bg-slate-950 flex flex-col justify-center items-center aspect-square border-none shadow-2xl">
           <div className="h-full w-full bg-gradient-to-br from-blue-900/40 to-slate-900 flex flex-col justify-center items-center">
             {selectedPhoto ? (
-              <img
-                src={selectedPhoto}
-                alt="Evidence Preview"
-                className="w-full h-full object-contain"
-              />
+              <>
+                <img
+                  src={selectedPhoto.photo}
+                  alt="Evidence Preview"
+                  className="w-full h-full object-contain"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDeletePhoto(selectedPhoto)}
+                  className="absolute top-3 right-3 h-9 rounded-lg text-xs font-bold"
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  Delete Photo
+                </Button>
+              </>
             ) : (
               <>
                 <ImageIcon className="h-16 w-16 text-slate-600 mb-2" />

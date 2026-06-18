@@ -235,7 +235,10 @@ export const deleteEvidenceFile = createServerFn({ method: "POST" })
     }
 
     // Delete from DB
-    const { error } = await supabase.from("evidence_files").delete().eq("id", data.evidence_id);
+    const { error } = await supabase.rpc(
+      "delete_evidence_with_consistency",
+      { p_evidence_id: data.evidence_id },
+    );
 
     if (error) throw new Error(`Delete error: ${error.message}`);
 

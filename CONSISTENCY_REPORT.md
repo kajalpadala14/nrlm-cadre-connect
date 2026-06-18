@@ -16,6 +16,7 @@
 - Realtime cache sync only watched `activities`, so attendance, approvals, evidence, profile, and notification changes left pages stale.
 - Mutation handlers invalidated one or two local query keys instead of every dependent dashboard/report/feed query.
 - Activity-generated attendance was stored in the same `(cadre_id, date)` row as manual attendance without a source link, so deletion could not distinguish generated attendance from independent attendance.
+- The activity delete UI still deleted `activities` directly. Rows created before `activity_attendance_links` existed, such as Basanti's auto-marked attendance, had no link row for the trigger to reverse.
 - Activity card attendance lookup used only `date`, which could match another cadre's attendance for the same day.
 - Some visible dashboard/evidence values were hardcoded or fake (`5 / 5 Blocks`, `42 Panchayats`, fixed evidence GPS, fallback mock blocks, locked admin GPS).
 - Retroactive evidence upload updated `activities.photo_url` but did not create an `evidence_files` metadata row.
@@ -32,10 +33,18 @@ Migration: `supabase/migrations/20260618150000_universal_consistency_cascade_syn
 - Reasserted cascade foreign keys for `evidence_files.activity_id` and `activity_approvals.activity_id`.
 - Added consistency-critical tables to `supabase_realtime`: `activities`, `activity_approvals`, `attendance`, `evidence_files`, `notifications`, `profiles`.
 
+Migration: `supabase/migrations/20260618170000_fix_activity_delete_attendance_cascade.sql`
+
+- Added `public.reverse_activity_attendance(p_activity_id, p_cadre_id, p_activity_date)`.
+- Added `public.delete_activity_with_consistency(p_activity_id)`.
+- Added legacy cleanup for auto-attendance rows with `status = 'present'`, `recorded_by = cadre_id`, same `cadre_id/date`, and no other same-day activity.
+- Extended `public.audit_data_consistency()` with `legacy_auto_attendance_without_activity`.
+- Added `activity_attendance_links` to Supabase Realtime publication.
+
 ## Before vs After
 
 - Before: deleting an activity could leave attendance, evidence, reports, and dashboards stale.
-- After: activity deletion cascades database dependents, restores/removes only linked auto-attendance, removes storage files in app delete flow, and realtime invalidation refreshes dependent pages.
+- After: activity deletion calls `delete_activity_with_consistency`, reverses/removes linked auto-attendance, cleans legacy auto-attendance when it is the last same-day activity, removes storage files in app delete flow, and realtime invalidation refreshes dependent pages.
 - Before: approval/evidence decisions refreshed only the current page or dashboard stats.
 - After: approval/evidence/attendance changes invalidate activities, attendance, reports, dashboard, evidence, approvals, notifications, and cadre/user lists.
 - Before: dashboards included some hardcoded/fake coverage/GPS values.
@@ -44,7 +53,7 @@ Migration: `supabase/migrations/20260618150000_universal_consistency_cascade_syn
 ## Verification
 
 - `npm.cmd run build` passed after implementation.
-- Verified compile coverage for create activity, auto attendance RPC calls, retroactive photo evidence metadata insert, activity delete cascade path, approval/rejection invalidation, realtime subscriptions, and live dashboard cleanup.
+- Verified compile coverage for create activity, auto attendance RPC calls, retroactive photo evidence metadata insert, activity delete cascade RPC path, approval/rejection invalidation, realtime subscriptions, and live dashboard cleanup.
 
 ## Production Checklist
 
