@@ -223,16 +223,19 @@ export type Database = {
       blocks: {
         Row: {
           created_at: string
+          district_name: string | null
           id: string
           name: string
         }
         Insert: {
           created_at?: string
+          district_name?: string | null
           id?: string
           name: string
         }
         Update: {
           created_at?: string
+          district_name?: string | null
           id?: string
           name?: string
         }

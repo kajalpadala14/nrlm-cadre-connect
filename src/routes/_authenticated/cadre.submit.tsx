@@ -85,6 +85,26 @@ const ACTIVITY_MAP: Record<string, ActivityType> = {
   Other: "Other",
 };
 
+const DISTRICTS = ["Dantewada"] as const;
+const DANTEWADA_BLOCK_NAMES = ["Dantewada", "Geedam", "Katekalyan", "Kuwakonda"] as const;
+const FALLBACK_BLOCK_PREFIX = "fallback:";
+
+type BlockOption = {
+  id: string;
+  name: string;
+  district_name?: string | null;
+  isFallback?: boolean;
+};
+
+const fallbackBlocks: BlockOption[] = DANTEWADA_BLOCK_NAMES.map((name) => ({
+  id: `${FALLBACK_BLOCK_PREFIX}${name}`,
+  name,
+  district_name: "Dantewada",
+  isFallback: true,
+}));
+
+const isFallbackBlockId = (value: string) => value.startsWith(FALLBACK_BLOCK_PREFIX);
+
 const readAscii = (view: DataView, offset: number, length: number) => {
   let value = "";
   for (let i = 0; i < length; i += 1) {
@@ -302,27 +322,94 @@ function SubmitPage() {
   const [busy, setBusy] = useState(false);
 
   // Fetch Blocks from DB
-  const { data: blocks } = useQuery({
-    queryKey: ["blocks"],
+  const {
+    data: blocks = [],
+    error: blocksError,
+    isLoading: blocksLoading,
+  } = useQuery({
+    queryKey: ["blocks", district],
     queryFn: async () => {
-      const { data, error } = await supabase.from("blocks").select("id,name").order("name");
-      if (error) throw error;
-      return data;
+      console.log("[Location] Selected district:", district);
+      const districtQuery = await supabase
+        .from("blocks")
+        .select("id,name,district_name")
+        .eq("district_name", district)
+        .order("name");
+
+      if (districtQuery.error) {
+        console.warn("[Location] District-aware blocks query failed, retrying legacy schema:", districtQuery.error);
+        const legacyQuery = await supabase.from("blocks").select("id,name").order("name");
+        const legacyBlocks = ((legacyQuery.data ?? []) as BlockOption[]).filter((block) =>
+          DANTEWADA_BLOCK_NAMES.includes(block.name as (typeof DANTEWADA_BLOCK_NAMES)[number]),
+        );
+
+        console.log("[Location] Legacy blocks query response:", legacyQuery);
+        console.log("[Location] Legacy Dantewada blocks returned:", legacyBlocks.length);
+
+        if (legacyQuery.error) {
+          console.error("[Location] Legacy blocks query error:", legacyQuery.error);
+        }
+
+        return legacyBlocks.length > 0 ? legacyBlocks : fallbackBlocks;
+      }
+
+      const data = (districtQuery.data ?? []) as BlockOption[];
+      console.log("[Location] Blocks query response:", districtQuery);
+      console.log("[Location] Blocks returned:", data.length);
+
+      return data.length > 0 ? data : fallbackBlocks;
     },
   }); // Synchronize blockId state when profile data loaded asynchronously
-  useEffect(() => {
-    if (profile?.block_id) {
-      setBlockId(profile.block_id);
-    }
-  }, [profile]);
 
-  // If profile has no block assigned, default to the first available block
-  // so the field is not silently empty and the validation doesn't block submission.
+  const visibleBlocks = blocks;
+  const selectedBlock = visibleBlocks.find((b) => b.id === blockId);
+  const selectedDbBlockId = selectedBlock && !selectedBlock.isFallback && !isFallbackBlockId(blockId)
+    ? blockId
+    : null;
+
   useEffect(() => {
-    if (!profile?.block_id && blocks && blocks.length > 0 && !blockId) {
-      setBlockId(blocks[0].id);
+    if (blocksError) {
+      console.error("[Location] Blocks query error:", blocksError);
     }
-  }, [blocks, profile, blockId]);
+  }, [blocksError]);
+
+  useEffect(() => {
+    console.log("[Location] Cascading state:", {
+      district,
+      blockId,
+      blockCount: visibleBlocks.length,
+      panchayat,
+      village,
+    });
+  }, [district, blockId, visibleBlocks.length, panchayat, village]);
+
+  const handleDistrictChange = (nextDistrict: string) => {
+    console.log("[Location] District changed:", { previous: district, next: nextDistrict });
+    setDistrict(nextDistrict);
+    setBlockId("");
+    setPanchayat("");
+    setVillage("");
+  };
+
+  const handleBlockChange = (nextBlockId: string) => {
+    console.log("[Location] Block changed:", { district, previous: blockId, next: nextBlockId });
+    setBlockId(nextBlockId);
+    setPanchayat("");
+    setVillage("");
+  };
+
+  useEffect(() => {
+    if (visibleBlocks.length === 0) return;
+
+    if (profile?.block_id && visibleBlocks.some((block) => block.id === profile.block_id)) {
+      setBlockId(profile.block_id);
+      return;
+    }
+
+    if (!blockId || !visibleBlocks.some((block) => block.id === blockId)) {
+      setBlockId(visibleBlocks[0].id);
+    }
+  }, [visibleBlocks, profile, blockId]);
 
   // Get real GPS location if browser supports it.
   // On denial, set status to "denied" and leave gpsLocation as null
@@ -554,8 +641,8 @@ function SubmitPage() {
       cadre_name: profile.full_name,
       role: profile.cadre_type ?? "PRP",
       activity_date: actDate,
-      block_id: blockId,
-      block_name: blocks?.find((b) => b.id === blockId)?.name ?? "",
+      block_id: selectedDbBlockId,
+      block_name: selectedBlock?.name ?? "",
       panchayat: panchayat.trim(),
       village_name: village.trim(),
       activity_type: ACTIVITY_MAP[actType] ?? "Other",
@@ -582,7 +669,7 @@ function SubmitPage() {
 
     setBusy(true);
     try {
-      console.log("[Submit] Starting. profile.id =", profile.id, "blockId =", blockId);
+      console.log("[Submit] Starting. profile.id =", profile.id, "blockId =", blockId, "dbBlockId =", selectedDbBlockId);
       console.log("Starting photo upload");
 
       // 1. Upload photos — non-blocking: if bucket missing or policy fails,
@@ -639,7 +726,7 @@ function SubmitPage() {
       const insertPayload = {
         cadre_id: profile.id,
         activity_date: actDate,
-        block_id: blockId,
+        block_id: selectedDbBlockId,
         village_name: village.trim(),
         panchayat: panchayat.trim(),
         beneficiaries: beneficiaryCount,
@@ -883,29 +970,33 @@ function SubmitPage() {
 
             <div className="flex flex-col gap-1.5">
               <Label className="text-slate-500 font-bold">{t("district_label")}</Label>
-              <Select value={district} onValueChange={setDistrict}>
+              <Select value={district} onValueChange={handleDistrictChange}>
                 <SelectTrigger className="h-10 text-xs rounded-lg border-slate-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Dantewada">Dantewada</SelectItem>
+                  {DISTRICTS.map((districtName) => (
+                    <SelectItem key={districtName} value={districtName}>
+                      {districtName}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="flex flex-col gap-1.5">
               <Label className="text-slate-500 font-bold">{t("block_form")}</Label>
-              {blocks === undefined ? (
+              {blocksLoading ? (
                 <div className="h-10 rounded-lg border border-slate-200 bg-slate-50 animate-pulse flex items-center px-3">
                   <span className="text-[10px] text-slate-400 font-semibold">Loading blocks...</span>
                 </div>
               ) : (
-                <Select value={blockId} onValueChange={setBlockId}>
+                <Select value={blockId} onValueChange={handleBlockChange}>
                   <SelectTrigger className="h-10 text-xs rounded-lg border-slate-200">
                     <SelectValue placeholder={t("select_block")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {blocks.map((b) => (
+                    {visibleBlocks.map((b) => (
                       <SelectItem key={b.id} value={b.id}>
                         {b.name}
                       </SelectItem>
