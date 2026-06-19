@@ -31,6 +31,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { cn } from "@/lib/utils";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
+import { addActivityDraft, clearActivityDrafts, getActivityDrafts } from "@/lib/offline-drafts";
 
 type ActivityType = Database["public"]["Enums"]["activity_type"];
 
@@ -347,14 +348,17 @@ function SubmitPage() {
     );
   }, []);
 
-  // Handle Offline Status local drafts storage loading
+  // Handle Offline Status IndexedDB draft loading
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const cachedDrafts = localStorage.getItem("nrlm_activities_drafts");
-      if (cachedDrafts) {
-        setDrafts(JSON.parse(cachedDrafts));
-      }
-    }
+    let isMounted = true;
+
+    getActivityDrafts().then((cachedDrafts) => {
+      if (isMounted) setDrafts(cachedDrafts);
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -362,13 +366,6 @@ function SubmitPage() {
       photoPreviewUrlsRef.current.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
     };
   }, []);
-
-  const saveDraftsToLocalStorage = (newDrafts: any[]) => {
-    setDrafts(newDrafts);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("nrlm_activities_drafts", JSON.stringify(newDrafts));
-    }
-  };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -571,10 +568,15 @@ function SubmitPage() {
     };
 
     if (isOffline || status === "Draft") {
-      const updated = [payload, ...drafts];
-      saveDraftsToLocalStorage(updated);
-      toast.warning("ड्राफ्ट के रूप में सहेजा गया / Saved as Draft locally");
-      navigate({ to: "/cadre/history" });
+      try {
+        const updated = await addActivityDraft(payload);
+        setDrafts(updated);
+        toast.warning("ड्राफ्ट के रूप में सहेजा गया / Saved as Draft locally");
+        navigate({ to: "/cadre/history" });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(`Offline cache error: ${message}`);
+      }
       return;
     }
 
@@ -744,7 +746,8 @@ function SubmitPage() {
         if (attendanceError) throw attendanceError;
       }
       }
-      saveDraftsToLocalStorage([]);
+      await clearActivityDrafts();
+      setDrafts([]);
       invalidateConsistencyQueries(qc);
       toast.success("सभी ड्राफ्ट सिंक हो गए और उपस्थिति सत्यापन लंबित है / All offline drafts synced and attendance verification set to pending");
     } catch (e: any) {
@@ -809,6 +812,18 @@ function SubmitPage() {
               {t("sync_drafts")} ({drafts.length})
             </Button>
           )}
+          <button
+            type="button"
+            onClick={() => setIsOffline((prev) => !prev)}
+            className={cn(
+              "text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 transition-colors",
+              isOffline
+                ? "bg-rose-50 border-rose-200 text-rose-700"
+                : "bg-slate-50 hover:bg-slate-100 text-slate-700",
+            )}
+          >
+            {isOffline ? "Switch to Online" : t("go_offline")}
+          </button>
 
         </div>
       </div>

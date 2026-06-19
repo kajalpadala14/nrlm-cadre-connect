@@ -44,6 +44,7 @@ import {
 } from "recharts";
 import { BarChart3, Search, Calendar, Landmark } from "lucide-react";
 import { invalidateConsistencyQueries, useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
+import { addActivityDraft, clearActivityDrafts, getActivityDrafts } from "@/lib/offline-drafts";
 
 export const Route = createFileRoute("/_authenticated/dashboard/activities")({
   component: ActivitiesPage,
@@ -128,6 +129,18 @@ function ActivitiesPage() {
   // Offline caching simulator
   const [isOffline, setIsOffline] = useState(false);
   const [drafts, setDrafts] = useState<any[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getActivityDrafts().then((cachedDrafts) => {
+      if (isMounted) setDrafts(cachedDrafts);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Fetch Blocks from DB
   const { data: blocks } = useQuery({
@@ -343,16 +356,22 @@ function ActivitiesPage() {
     };
 
     if (isOffline || status === "Draft") {
-      setDrafts((prev) => [...prev, payload]);
-      toast.warning(t("saved_as_draft"));
-      setVillage("");
-      setPanchayat("");
-      setDescription("");
-      setBeneficiaryCount(0);
-      setPhotos([]);
-      setPhotoPreviews([]);
-      setPdfDoc(null);
-      setActiveTab("list");
+      try {
+        const updatedDrafts = await addActivityDraft(payload);
+        setDrafts(updatedDrafts);
+        toast.warning(t("saved_as_draft"));
+        setVillage("");
+        setPanchayat("");
+        setDescription("");
+        setBeneficiaryCount(0);
+        setPhotos([]);
+        setPhotoPreviews([]);
+        setPdfDoc(null);
+        setActiveTab("list");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(`Offline cache error: ${message}`);
+      }
       return;
     }
 
@@ -491,6 +510,7 @@ function ActivitiesPage() {
         });
         if (error) throw error;
       }
+      await clearActivityDrafts();
       setDrafts([]);
       await refetchActivities();
       toast.success(t("submission_success"));
