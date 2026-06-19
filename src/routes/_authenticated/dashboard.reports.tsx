@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileText, Calendar, ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProfile, highestRole } from "@/hooks/use-auth";
+import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { exportToExcel } from "@/lib/excel";
@@ -158,8 +159,8 @@ function ReportsPage() {
   const { t } = useT();
   useActivityCacheSync();
   const { data: profile } = useProfile();
-  const role = highestRole(profile?.roles ?? []);
-  const officerBlock = role === "block_officer" ? (profile?.block_id ?? null) : null;
+  const scope = getUserDataScope(profile);
+  const officerBlock = scope.isScoped ? (scope.blockId ?? null) : null;
 
   // Tab state
   const [activeTab, setActiveTab] = useState<ReportTab>("attendance");
@@ -172,6 +173,12 @@ function ReportsPage() {
 
   // Shared block filter (admins only)
   const [blockFilter, setBlockFilter] = useState("all");
+
+  useEffect(() => {
+    if (scope.isScoped && scope.blockId) {
+      setBlockFilter(scope.blockId);
+    }
+  }, [scope.isScoped, scope.blockId]);
 
   // Blocks list for dropdown
   const { data: blocks = [] } = useQuery({
@@ -188,7 +195,10 @@ function ReportsPage() {
     }
   }
 
-  const effectiveBlock = officerBlock ?? (blockFilter === "all" ? null : blockFilter);
+  // Wait for profile before computing effective block (prevents wrong data on first render)
+  const effectiveBlock = !scope.ready
+    ? undefined
+    : (officerBlock ?? (blockFilter === "all" ? null : blockFilter));
 
   const tabs: { id: ReportTab; label: string }[] = [
     { id: "attendance",        label: t("tab_attendance_label") },
@@ -309,17 +319,17 @@ function ReportsPage() {
       </div>
 
       {/* ── Active Report Panel ─────────────────────────────────── */}
-      {activeTab === "attendance" && (
+      {activeTab === "attendance" && effectiveBlock !== undefined && (
         <AttendanceReport from={from} to={to} blockId={effectiveBlock} />
       )}
-      {activeTab === "activity" && (
+      {activeTab === "activity" && effectiveBlock !== undefined && (
         <ActivityReport from={from} to={to} blockId={effectiveBlock} />
       )}
-      {activeTab === "cadre_performance" && (
+      {activeTab === "cadre_performance" && effectiveBlock !== undefined && (
         <CadrePerformanceReport from={from} to={to} blockId={effectiveBlock} />
       )}
-      {activeTab === "block_performance" && (
-        <BlockPerformanceReport from={from} to={to} />
+      {activeTab === "block_performance" && effectiveBlock !== undefined && (
+        <BlockPerformanceReport from={from} to={to} blockId={effectiveBlock} />
       )}
     </div>
   );
@@ -376,7 +386,7 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
       let q = supabase
         .from("attendance")
         .select(`
-          date, status, check_in_at, check_out_at, remarks,
+          date, status, check_in_at, check_out_at, remarks, block_id, cadre_id,
           profiles!attendance_cadre_id_fkey(full_name, user_id, cadre_type, village,
             blocks!profiles_block_id_fkey(name))
         `)
@@ -384,7 +394,10 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
         .lte("date", to)
         .order("date", { ascending: false })
         .limit(5000);
-      if (blockId) q = (q as any).eq("block_id", blockId);
+      if (blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        q = applyScopeToQuery(q, true, blockId, cadreIds);
+      }
       const { data, error } = await q;
       if (error) throw error;
       return data ?? [];
@@ -515,15 +528,18 @@ function ActivityReport({ from, to, blockId }: { from: string; to: string; block
         .from("activities")
         .select(`
           activity_date, activity_type, village_name, panchayat,
-          beneficiaries, status, photo_url, submitted_at, description,
-          profiles!activities_cadre_id_fkey_profiles(full_name, user_id, cadre_type),
+          beneficiaries, status, photo_url, submitted_at, description, block_id, cadre_id,
+          profiles!activities_cadre_id_fkey_profiles(full_name, user_id, cadre_type, block_id, blocks!profiles_block_id_fkey(name)),
           blocks!activities_block_id_fkey(name)
         `)
         .gte("activity_date", from)
         .lte("activity_date", to)
         .order("activity_date", { ascending: false })
         .limit(5000);
-      if (blockId) q = q.eq("block_id", blockId);
+      if (blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        q = applyScopeToQuery(q, true, blockId, cadreIds);
+      }
       const { data, error } = await q;
       if (error) throw error;
       return data ?? [];
@@ -548,7 +564,7 @@ function ActivityReport({ from, to, blockId }: { from: string; to: string; block
         "Cadre Name": p.full_name ?? "",
         "User ID": p.user_id ?? "",
         "Cadre Type": p.cadre_type ?? "",
-        Block: (r.blocks as any)?.name ?? "",
+        Block: (r.blocks as any)?.name || p.blocks?.name || "",
         Panchayat: r.panchayat ?? "",
         Village: r.village_name,
         "Activity Type": ACT_LABEL[r.activity_type] ?? r.activity_type,
@@ -565,7 +581,7 @@ function ActivityReport({ from, to, blockId }: { from: string; to: string; block
   const tableRows = rows.slice(0, 200).map((r: any) => [
     r.activity_date,
     (r.profiles as any)?.full_name ?? "—",
-    (r.blocks as any)?.name ?? "—",
+    (r.blocks as any)?.name || (r.profiles as any)?.blocks?.name || "—",
     r.village_name,
     ACT_LABEL[r.activity_type] ?? r.activity_type,
     r.beneficiaries ?? 0,
@@ -651,8 +667,11 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
   const { data: attData = [], isLoading: loadingAtt } = useQuery({
     queryKey: ["rpt-cp-att", from, to, blockId],
     queryFn: async () => {
-      let q = supabase.from("attendance").select("cadre_id, status").gte("date", from).lte("date", to);
-      if (blockId) q = q.eq("block_id", blockId);
+      let q = supabase.from("attendance").select("cadre_id, status, block_id").gte("date", from).lte("date", to);
+      if (blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        q = applyScopeToQuery(q, true, blockId, cadreIds);
+      }
       const { data } = await q;
       return data ?? [];
     },
@@ -662,8 +681,11 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
   const { data: actData = [], isLoading: loadingAct } = useQuery({
     queryKey: ["rpt-cp-act", from, to, blockId],
     queryFn: async () => {
-      let q = supabase.from("activities").select("cadre_id, status, village_name, beneficiaries").gte("activity_date", from).lte("activity_date", to);
-      if (blockId) q = q.eq("block_id", blockId);
+      let q = supabase.from("activities").select("cadre_id, status, village_name, beneficiaries, block_id").gte("activity_date", from).lte("activity_date", to);
+      if (blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        q = applyScopeToQuery(q, true, blockId, cadreIds);
+      }
       const { data } = await q;
       return data ?? [];
     },
@@ -767,36 +789,52 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
 }
 
 // ─── BLOCK PERFORMANCE REPORT ─────────────────────────────────────────────
-function BlockPerformanceReport({ from, to }: { from: string; to: string }) {
+function BlockPerformanceReport({ from, to, blockId }: { from: string; to: string; blockId: string | null }) {
   const { data: blocks = [], isLoading: loadingBlocks } = useQuery({
-    queryKey: ["blocks"],
-    queryFn: async () => (await supabase.from("blocks").select("id,name").order("name")).data ?? [],
+    queryKey: ["blocks", blockId],
+    queryFn: async () => {
+      let q = supabase.from("blocks").select("id,name").order("name");
+      if (blockId) q = q.eq("id", blockId);
+      return (await q).data ?? [];
+    },
   });
 
   const { data: attData = [], isLoading: loadingAtt } = useQuery({
-    queryKey: ["rpt-bp-att", from, to],
+    queryKey: ["rpt-bp-att", from, to, blockId],
     queryFn: async () => {
-      const { data } = await supabase.from("attendance").select("block_id, cadre_id, status, date").gte("date", from).lte("date", to);
+      let q = supabase.from("attendance").select("block_id, cadre_id, status, date").gte("date", from).lte("date", to);
+      if (blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        q = applyScopeToQuery(q, true, blockId, cadreIds);
+      }
+      const { data } = await q;
       return data ?? [];
     },
   });
 
   const { data: actData = [], isLoading: loadingAct } = useQuery({
-    queryKey: ["rpt-bp-act", from, to],
+    queryKey: ["rpt-bp-act", from, to, blockId],
     queryFn: async () => {
-      const { data } = await supabase.from("activities").select("block_id, cadre_id, status, village_name, beneficiaries").gte("activity_date", from).lte("activity_date", to);
+      let q = supabase.from("activities").select("block_id, cadre_id, status, village_name, beneficiaries").gte("activity_date", from).lte("activity_date", to);
+      if (blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        q = applyScopeToQuery(q, true, blockId, cadreIds);
+      }
+      const { data } = await q;
       return data ?? [];
     },
   });
 
   // Cadre counts per block
   const { data: profilesData = [], isLoading: loadingProfiles } = useQuery({
-    queryKey: ["rpt-bp-profiles"],
+    queryKey: ["rpt-bp-profiles", blockId],
     queryFn: async () => {
       const { data: urData } = await supabase.from("user_roles").select("user_id").eq("role", "cadre");
       const ids = (urData ?? []).map((r) => r.user_id);
       if (ids.length === 0) return [];
-      const { data } = await supabase.from("profiles").select("id, block_id").in("id", ids);
+      let q = supabase.from("profiles").select("id, block_id").in("id", ids);
+      if (blockId) q = q.eq("block_id", blockId);
+      const { data } = await q;
       return data ?? [];
     },
   });
@@ -804,10 +842,12 @@ function BlockPerformanceReport({ from, to }: { from: string; to: string }) {
   const isLoading = loadingBlocks || loadingAtt || loadingAct || loadingProfiles;
 
   const rows = useMemo(() => {
+    const cadreToBlockMap = new Map(profilesData.map((p: any) => [p.id, p.block_id]));
+
     return blocks.map((b) => {
       const totalCadres = profilesData.filter((p: any) => p.block_id === b.id).length;
-      const bAtt = attData.filter((a: any) => a.block_id === b.id);
-      const bAct = actData.filter((a: any) => a.block_id === b.id);
+      const bAtt = attData.filter((a: any) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id);
+      const bAct = actData.filter((a: any) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id);
 
       const present = bAtt.filter((a: any) => a.status === "present").length;
       const absent = bAtt.filter((a: any) => a.status === "absent").length;

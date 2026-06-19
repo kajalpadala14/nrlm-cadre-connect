@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useProfile, highestRole } from "@/hooks/use-auth";
+import { getUserDataScope } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { createUser, deleteUser, resetUserPin } from "@/lib/admin.functions";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
@@ -101,6 +102,7 @@ const getStaffRoleLabel = (role: StaffFormRole) =>
 function UsersPage() {
   const { t } = useT();
   const { data: me } = useProfile();
+  const scope = getUserDataScope(me);
   const isAdmin = highestRole(me?.roles ?? []) === "admin";
 
   // Tab state: "cadres" | "staff"
@@ -139,6 +141,7 @@ function UsersPage() {
   } = useQuery({
     queryKey: ["staff-list"],
     queryFn: async () => {
+      if (!isAdmin) return [];
       // Step 1: fetch all admin / block_officer rows from user_roles
       const { data: userRoles, error: rolesError } = await supabase
         .from("user_roles")
@@ -201,7 +204,7 @@ function UsersPage() {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["cadres-list"],
+    queryKey: ["cadres-list", scope.blockId],
     queryFn: async () => {
       const { data: userRoles, error: urError } = await supabase
         .from("user_roles")
@@ -212,12 +215,16 @@ function UsersPage() {
       const cadreIds = userRoles.map((ur) => ur.user_id);
       if (cadreIds.length === 0) return [];
 
-      const { data: profiles, error: pError } = await supabase
+      let profilesQuery = supabase
         .from("profiles")
         .select(
           "id, user_id, full_name, cadre_type, block_id, phone, village, gender, panchayat, join_date, status",
         )
         .in("id", cadreIds);
+      if (scope.isScoped && scope.blockId) {
+        profilesQuery = profilesQuery.eq("block_id", scope.blockId);
+      }
+      const { data: profiles, error: pError } = await profilesQuery;
       if (pError) throw pError;
 
       return (profiles ?? []).map((p) => ({
@@ -242,7 +249,10 @@ function UsersPage() {
   const handleOpenAdd = () => {
     if (isCadreSaving) return;
     setEditingCadre(null);
-    setForm(EMPTY_FORM);
+    setForm({
+      ...EMPTY_FORM,
+      block_id: scope.isScoped && scope.blockId ? scope.blockId : (blocks && blocks.length > 0 ? blocks[0].id : ""),
+    });
     setOpen(true);
   };
 
@@ -305,7 +315,7 @@ function UsersPage() {
             full_name: form.name,
             phone: form.phone || null,
             cadre_type: form.role as any,
-            block_id: form.block_id || null,
+            block_id: scope.isScoped && scope.blockId ? scope.blockId : (form.block_id || null),
             village: village || null,
             panchayat: panchayat || null,
             gender: form.gender || null,
@@ -349,7 +359,7 @@ function UsersPage() {
             phone: form.phone || null,
             role: "cadre",
             cadre_type: form.role as any,
-            block_id: form.block_id || null,
+            block_id: scope.isScoped && scope.blockId ? scope.blockId : (form.block_id || null),
             village: village || null,
             panchayat: panchayat || null,
             gender: form.gender || null,
@@ -562,18 +572,20 @@ function UsersPage() {
           <Users className="h-3.5 w-3.5" />
           Field Cadres
         </button>
-        <button
-          onClick={() => setActiveTab("staff")}
-          className={cn(
-            "flex items-center gap-1.5 px-4 py-2 rounded-lg transition-all",
-            activeTab === "staff"
-              ? "bg-white text-slate-800 shadow-sm"
-              : "text-slate-500 hover:text-slate-700",
-          )}
-        >
-          <Shield className="h-3.5 w-3.5" />
-          Staff (Block Officers &amp; Admins)
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab("staff")}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2 rounded-lg transition-all",
+              activeTab === "staff"
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700",
+            )}
+          >
+            <Shield className="h-3.5 w-3.5" />
+            Staff (Block Officers &amp; Admins)
+          </button>
+        )}
       </div>
 
       {/* Cadre Table Grid — only shown when "cadres" tab is active */}
@@ -1113,16 +1125,19 @@ function UsersPage() {
                 <Select
                   value={form.block_id}
                   onValueChange={(v) => setForm({ ...form, block_id: v })}
+                  disabled={scope.isScoped}
                 >
                   <SelectTrigger className="h-10 rounded-lg border-slate-200 text-xs">
                     <SelectValue placeholder="Select Block" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(blocks ?? []).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
+                    {(blocks ?? [])
+                      .filter((b) => !scope.isScoped || b.id === scope.blockId)
+                      .map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
                     {(blocks ?? []).length === 0 && (
                       <SelectItem value="__none" disabled>No blocks available</SelectItem>
                     )}

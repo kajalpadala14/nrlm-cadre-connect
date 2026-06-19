@@ -26,6 +26,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { useProfile } from "@/hooks/use-auth";
+import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -35,8 +37,17 @@ export const Route = createFileRoute("/_authenticated/dashboard/attendance")({
 
 function AttendancePage() {
   const { t } = useT();
+  const { data: profile } = useProfile();
+  const scope = getUserDataScope(profile);
   const [date, setDate] = useState<Date>(new Date());
   const [blockFilter, setBlockFilter] = useState("all");
+
+  useEffect(() => {
+    if (scope.isScoped && scope.blockId) {
+      setBlockFilter(scope.blockId);
+    }
+  }, [scope.isScoped, scope.blockId]);
+
   const [searchTerm, setSearchTerm] = useState("");
 
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
@@ -53,7 +64,8 @@ function AttendancePage() {
   });
 
   const { data: cadres = [], isLoading: isCadresLoading } = useQuery({
-    queryKey: ["cadres"],
+    queryKey: ["cadres", scope.blockId ?? "all"],
+    enabled: scope.ready,
     queryFn: async () => {
       const { data: userRoles, error: urError } = await supabase
         .from("user_roles")
@@ -64,10 +76,14 @@ function AttendancePage() {
       const cadreIds = userRoles.map((ur) => ur.user_id);
       if (cadreIds.length === 0) return [];
 
-      const { data: profiles, error: pError } = await supabase
+      let profilesQuery = supabase
         .from("profiles")
         .select("id, full_name, cadre_type, block_id, blocks(name)")
         .in("id", cadreIds);
+      if (scope.isScoped && scope.blockId) {
+        profilesQuery = profilesQuery.eq("block_id", scope.blockId);
+      }
+      const { data: profiles, error: pError } = await profilesQuery;
       if (pError) throw pError;
 
       return profiles ?? [];
@@ -81,9 +97,15 @@ function AttendancePage() {
     isLoading: isAttendanceLoading,
     refetch: refetchAttendance,
   } = useQuery({
-    queryKey: ["attendance", dateStr],
+    queryKey: ["attendance", dateStr, scope.blockId ?? "all"],
+    enabled: scope.ready,
     queryFn: async () => {
-      const { data, error } = await supabase.from("attendance").select("*").eq("date", dateStr);
+      let attQ = supabase.from("attendance").select("*").eq("date", dateStr);
+      if (scope.isScoped && scope.blockId) {
+        const cadreIds = await getCadreIdsInBlock(scope.blockId);
+        attQ = applyScopeToQuery(attQ, true, scope.blockId, cadreIds);
+      }
+      const { data, error } = await attQ;
       if (error) throw error;
       return data ?? [];
     },
@@ -292,17 +314,19 @@ function AttendancePage() {
             {/* Block Filter */}
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-bold text-slate-500">{t("block_filter_label")}</Label>
-              <Select value={blockFilter} onValueChange={setBlockFilter}>
+              <Select value={blockFilter} onValueChange={setBlockFilter} disabled={scope.isScoped}>
                 <SelectTrigger className="h-10 rounded-xl border-slate-200 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">{t("all_blocks_label")}</SelectItem>
-                  {(blocks ?? []).map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
+                  {!scope.isScoped && <SelectItem value="all">{t("all_blocks_label")}</SelectItem>}
+                  {(blocks ?? [])
+                    .filter((b) => !scope.isScoped || b.id === scope.blockId)
+                    .map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

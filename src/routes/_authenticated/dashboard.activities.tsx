@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useProfile, highestRole } from "@/hooks/use-auth";
+import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
@@ -83,14 +84,21 @@ function ActivitiesPage() {
   const { data: profile } = useProfile();
   useActivityCacheSync();
   const role = highestRole(profile?.roles ?? []);
+  const scope = getUserDataScope(profile);
   // block_officer is auto-scoped to their own block; admins can pick any block
-  const officerBlockId = role === "block_officer" ? (profile?.block_id ?? null) : null;
+  const officerBlockId = scope.isScoped ? (scope.blockId ?? null) : null;
 
   const [activeTab, setActiveTab] = useState<"list" | "form">("list");
   const [busy, setBusy] = useState(false);
 
   // Block filter — admins can pick, block_officers are locked to their block
   const [filterBlockId, setFilterBlockId] = useState<string>("all");
+
+  useEffect(() => {
+    if (scope.isScoped && scope.blockId) {
+      setFilterBlockId(scope.blockId);
+    }
+  }, [scope.isScoped, scope.blockId]);
 
   // Local filter states for list searching
   const [filterCadreName, setFilterCadreName] = useState("");
@@ -149,10 +157,12 @@ function ActivitiesPage() {
   });
 
   useEffect(() => {
-    if (blocks && blocks.length > 0 && !blockId) {
+    if (scope.isScoped && scope.blockId) {
+      setBlockId(scope.blockId);
+    } else if (blocks && blocks.length > 0 && !blockId) {
       setBlockId(blocks[0].id);
     }
-  }, [blocks, blockId]);
+  }, [blocks, blockId, scope.isScoped, scope.blockId]);
 
   useEffect(() => {
     return () => {
@@ -160,8 +170,13 @@ function ActivitiesPage() {
     };
   }, []);
 
-  // Effective block for the query — block_officers are auto-scoped
-  const effectiveBlockId = officerBlockId ?? (filterBlockId === "all" ? null : filterBlockId);
+  // effectiveBlockId is null when:
+  // - profile not yet loaded (!scope.ready)
+  // - admin with no block filter selected
+  // It's a UUID when block officer or admin filtered to a block
+  const effectiveBlockId = !scope.ready
+    ? undefined  // undefined = query disabled
+    : (officerBlockId ?? (filterBlockId === "all" ? null : filterBlockId));
 
   // Fetch real activities from Supabase joined with profiles and blocks
   const {
@@ -169,23 +184,27 @@ function ActivitiesPage() {
     isLoading: isLoadingActivities,
     refetch: refetchActivities,
   } = useQuery<any[]>({
-    queryKey: ["admin-activities-list", effectiveBlockId],
+    queryKey: ["admin-activities-list", effectiveBlockId ?? "all"],
+    enabled: effectiveBlockId !== undefined,
     queryFn: async () => {
       let q = supabase
         .from("activities")
         .select(
           `
           *,
-          profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type),
+          profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type, block_id, blocks!profiles_block_id_fkey(name)),
           blocks(name)
         `,
         )
         .order("submitted_at", { ascending: false })
         .limit(500);
-      if (effectiveBlockId) q = q.eq("block_id", effectiveBlockId);
+      if (effectiveBlockId) {
+        const cadreIds = await getCadreIdsInBlock(effectiveBlockId);
+        q = applyScopeToQuery(q, true, effectiveBlockId, cadreIds);
+      }
       const { data, error } = await q;
       if (error) throw error;
-      return data;
+      return data ?? [];
     },
   });
 
@@ -194,11 +213,11 @@ function ActivitiesPage() {
     return dbActivities.map((a: any) => ({
       id: a.id,
       cadre_id: a.cadre_id,
-      block_id: a.block_id || null,
+      block_id: a.block_id || a.profiles?.block_id || null,
       cadre_name: a.profiles?.full_name || "Unknown Cadre",
       role: a.profiles?.cadre_type || "PRP",
       date: a.activity_date,
-      block_name: a.blocks?.name || "Unknown Block",
+      block_name: a.blocks?.name || a.profiles?.blocks?.name || "Unknown Block",
       village: a.village_name,
       panchayat: a.panchayat || "",
       activity_type: a.activity_type,
@@ -1194,16 +1213,18 @@ function ActivitiesPage() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label className="text-slate-500 font-bold">ब्लॉक / Block</Label>
-                <Select value={blockId} onValueChange={setBlockId}>
+                <Select value={blockId} onValueChange={setBlockId} disabled={scope.isScoped}>
                   <SelectTrigger className="h-10 text-xs rounded-lg border-slate-200">
                     <SelectValue placeholder="Select Block" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(blocks ?? []).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
+                    {(blocks ?? [])
+                      .filter((b) => !scope.isScoped || b.id === scope.blockId)
+                      .map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

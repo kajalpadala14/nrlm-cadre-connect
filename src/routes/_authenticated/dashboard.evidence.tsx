@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
@@ -32,6 +32,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useProfile } from "@/hooks/use-auth";
+import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
@@ -42,6 +43,8 @@ export const Route = createFileRoute("/_authenticated/dashboard/evidence")({
 });
 
 function EvidencePage() {
+  const { data: adminProfile } = useProfile();
+  const scope = getUserDataScope(adminProfile);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("All");
@@ -55,7 +58,11 @@ function EvidencePage() {
   const [activePhoto, setActivePhoto] = useState<any | null>(null);
   const [reviewComment, setReviewComment] = useState("");
 
-  const { data: adminProfile } = useProfile();
+  useEffect(() => {
+    if (scope.isScoped && scope.blockId) {
+      setSelectedBlock(scope.blockId);
+    }
+  }, [scope.isScoped, scope.blockId]);
   const { t } = useT();
   const qc = useQueryClient();
 
@@ -72,25 +79,56 @@ function EvidencePage() {
     isLoading: isLoadingEvidence,
     refetch: refetchEvidence,
   } = useQuery({
-    queryKey: ["evidence-gallery"],
+    queryKey: ["evidence-gallery", scope.blockId ?? "all"],
+    enabled: scope.ready,
     queryFn: async () => {
-      const { data: evidenceRows, error } = await supabase
-        .from("evidence_files")
-        .select("id, activity_id, cadre_id, storage_path, public_url, mime_type, latitude, longitude, created_at")
-        .like("mime_type", "image/%")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      let activityIds: string[] = [];
+      let activitiesData: any[] = [];
 
-      const activityIds = Array.from(new Set((evidenceRows ?? []).map((e) => e.activity_id)));
+
+      if (scope.isScoped && scope.blockId) {
+        // Scoped: fetch activities in this block first, then match evidence
+        const cadreIds = await getCadreIdsInBlock(scope.blockId);
+        let actQ = supabase
+          .from("activities")
+          .select("*, profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type, block_id, blocks(name)), blocks(name)");
+        actQ = applyScopeToQuery(actQ, true, scope.blockId, cadreIds);
+        const { data: activities, error: actError } = await actQ;
+        if (actError) throw actError;
+        activitiesData = activities ?? [];
+        activityIds = activitiesData.map((a) => a.id);
+      } else {
+        // Unscoped: fetch latest evidence first, then resolve activities
+        const { data: evidenceRows, error } = await supabase
+          .from("evidence_files")
+          .select("id, activity_id, cadre_id, storage_path, public_url, mime_type, latitude, longitude, created_at")
+          .like("mime_type", "image/%")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+
+        const unscopedActivityIds = Array.from(new Set((evidenceRows ?? []).map((e) => e.activity_id)));
+        if (unscopedActivityIds.length === 0) return [];
+
+        const { data: activities, error: actError } = await supabase
+          .from("activities")
+          .select("*, profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type, block_id, blocks(name)), blocks(name)")
+          .in("id", unscopedActivityIds);
+        if (actError) throw actError;
+        activitiesData = activities ?? [];
+        activityIds = unscopedActivityIds;
+      }
+
       if (activityIds.length === 0) return [];
 
-      const { data: activities, error: actError } = await supabase
-        .from("activities")
-        .select("*, profiles!activities_cadre_id_fkey_profiles(full_name, cadre_type), blocks(name)")
-        .in("id", activityIds);
-      if (actError) throw actError;
+      const { data: evidenceRows, error: evError } = await supabase
+        .from("evidence_files")
+        .select("id, activity_id, cadre_id, storage_path, public_url, mime_type, latitude, longitude, created_at")
+        .in("activity_id", activityIds)
+        .like("mime_type", "image/%")
+        .order("created_at", { ascending: false });
+      if (evError) throw evError;
 
-      const activityMap = new Map((activities ?? []).map((activity) => [activity.id, activity]));
+      const activityMap = new Map(activitiesData.map((activity) => [activity.id, activity]));
 
       return (evidenceRows ?? []).flatMap((evidence) => {
         const a = activityMap.get(evidence.activity_id);
@@ -108,9 +146,8 @@ function EvidencePage() {
           date: a.activity_date,
           type: a.activity_type.replace(/_/g, " "),
           village: a.village_name,
-          // Use the joined blocks.name; no stale blockMap closure needed
-          block: (a.blocks as any)?.name || "Unknown Block",
-          block_id: a.block_id || "",
+          block: (a.blocks as any)?.name || (a.profiles as any)?.blocks?.name || "Unknown Block",
+          block_id: a.block_id || (a.profiles as any)?.block_id || "",
           status: (a.status as string) || "Pending",
           latitude: evidence.latitude,
           longitude: evidence.longitude,
@@ -121,8 +158,8 @@ function EvidencePage() {
         }];
       });
     },
-    enabled: true,
   });
+
 
   // Build timeline from live data
   const timeline = useMemo(() => {
@@ -450,17 +487,19 @@ function EvidencePage() {
           {/* Block filter */}
           <div className="flex flex-col gap-1.5">
             <Label className="text-slate-400 font-bold">{t("block_label2")}</Label>
-            <Select value={selectedBlock} onValueChange={setSelectedBlock}>
+            <Select value={selectedBlock} onValueChange={setSelectedBlock} disabled={scope.isScoped}>
               <SelectTrigger className="h-9 text-xs rounded-lg border-slate-200">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">{t("all_blocks_label")}</SelectItem>
-                {(blocks ?? []).map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}
-                  </SelectItem>
-                ))}
+                {!scope.isScoped && <SelectItem value="all">{t("all_blocks_label")}</SelectItem>}
+                {(blocks ?? [])
+                  .filter((b) => !scope.isScoped || b.id === scope.blockId)
+                  .map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>

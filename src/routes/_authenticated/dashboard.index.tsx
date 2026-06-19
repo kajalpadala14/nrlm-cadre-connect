@@ -22,6 +22,7 @@ import {
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { useProfile } from "@/hooks/use-auth";
+import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -35,19 +36,26 @@ export const Route = createFileRoute("/_authenticated/dashboard/")({
 function Overview() {
   const { t, lang } = useT();
   useActivityCacheSync();
-  // Always show all blocks, always use today's date — filters removed
-  const blockId = "all";
+  const { data: adminProfile } = useProfile();
+  const scope = getUserDataScope(adminProfile);
+  // blockId is null until profile loads (scope.ready = false)
+  // "all" = admin sees everything; a valid UUID = block officer's block
+  const blockId = scope.ready ? (scope.isScoped ? scope.blockId : "all") : null;
   const date = new Date();
   const [dashboardTab, setDashboardTab] = useState<"operations" | "analytics">("operations");
-  const { data: adminProfile } = useProfile();
   const qc = useQueryClient();
 
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
   // DB queries with live statistics
+  // Wait for profile to load before running (blockId===null means not ready)
   const { data: dbStats, refetch } = useQuery({
     queryKey: ["dash-stats-raw", blockId, dateStr],
+    enabled: blockId !== null,
     queryFn: async () => {
+      // Fetch cadreIds if blockId is a UUID (not "all")
+      const cadreIds = blockId !== "all" && blockId ? await getCadreIdsInBlock(blockId) : [];
+
       // 1. Total Cadres count (filtered by block_id if not 'all')
       let totalCadres = 0;
       if (blockId === "all") {
@@ -57,27 +65,13 @@ function Overview() {
           .eq("role", "cadre");
         totalCadres = count ?? 0;
       } else {
-        const { data: cadreRoles } = await supabase
-          .from("user_roles")
-          .select("user_id")
-          .eq("role", "cadre");
-        const cadreIds = cadreRoles?.map((r) => r.user_id) || [];
-        if (cadreIds.length > 0) {
-          const { count } = await supabase
-            .from("profiles")
-            .select("id", { count: "exact", head: true })
-            .eq("block_id", blockId)
-            .in("id", cadreIds);
-          totalCadres = count ?? 0;
-        } else {
-          totalCadres = 0;
-        }
+        totalCadres = cadreIds.length;
       }
 
       // 2. Attendance count (present, absent, on_leave) on dateStr for the block
-      let attendanceQ = supabase.from("attendance").select("status");
-      if (blockId !== "all") {
-        attendanceQ = attendanceQ.eq("block_id", blockId);
+      let attendanceQ = supabase.from("attendance").select("status, cadre_id, block_id");
+      if (blockId !== "all" && blockId) {
+        attendanceQ = applyScopeToQuery(attendanceQ, true, blockId, cadreIds);
       }
       attendanceQ = attendanceQ.eq("date", dateStr);
       const { data: attData } = await attendanceQ;
@@ -87,9 +81,9 @@ function Overview() {
       const leaveCount = attData?.filter((a) => a.status === "on_leave").length ?? 0;
 
       // 3. Activities counts (overall / lifetime)
-      let actAllQ = supabase.from("activities").select("status, activity_type");
-      if (blockId !== "all") {
-        actAllQ = actAllQ.eq("block_id", blockId);
+      let actAllQ = supabase.from("activities").select("status, activity_type, cadre_id, block_id");
+      if (blockId !== "all" && blockId) {
+        actAllQ = applyScopeToQuery(actAllQ, true, blockId, cadreIds);
       }
       const { data: allActs } = await actAllQ;
 
@@ -109,9 +103,9 @@ function Overview() {
       const other = allActs?.filter((a) => a.activity_type === "Other").length ?? 0;
 
       // 4. Activities submitted today (on dateStr)
-      let actTodayQ = supabase.from("activities").select("cadre_id, village_name, panchayat, photo_url");
-      if (blockId !== "all") {
-        actTodayQ = actTodayQ.eq("block_id", blockId);
+      let actTodayQ = supabase.from("activities").select("cadre_id, village_name, panchayat, photo_url, block_id");
+      if (blockId !== "all" && blockId) {
+        actTodayQ = applyScopeToQuery(actTodayQ, true, blockId, cadreIds);
       }
       actTodayQ = actTodayQ.eq("activity_date", dateStr);
       const { data: actTodayRows } = await actTodayQ;
@@ -130,14 +124,15 @@ function Overview() {
           village_name,
           activity_type,
           submitted_at,
-          status
+          status,
+          block_id
         `,
         )
         .eq("status", "Pending")
         .order("submitted_at", { ascending: false });
 
-      if (blockId !== "all") {
-        pendingListQ = pendingListQ.eq("block_id", blockId);
+      if (blockId !== "all" && blockId) {
+        pendingListQ = applyScopeToQuery(pendingListQ, true, blockId, cadreIds);
       }
       const { data: pendingActivitiesList } = await pendingListQ;
 
@@ -154,7 +149,11 @@ function Overview() {
       }
 
       // 6. Block-wise list performance
-      const { data: blocksData } = await supabase.from("blocks").select("id, name");
+      let blocksQuery = supabase.from("blocks").select("id, name");
+      if (blockId !== "all" && blockId) {
+        blocksQuery = blocksQuery.eq("id", blockId);
+      }
+      const { data: blocksData } = await blocksQuery;
 
       interface BlockPerformance {
         name: string;
@@ -171,13 +170,13 @@ function Overview() {
           .from("user_roles")
           .select("user_id")
           .eq("role", "cadre");
-        const cadreIds = cadreRoles?.map((r) => r.user_id) || [];
+        const cadreIdsForBlock = cadreRoles?.map((r) => r.user_id) || [];
         let profs: { id: string; block_id: string | null; status: string | null }[] = [];
-        if (cadreIds.length > 0) {
+        if (cadreIdsForBlock.length > 0) {
           const { data } = await supabase
             .from("profiles")
             .select("id, block_id, status")
-            .in("id", cadreIds);
+            .in("id", cadreIdsForBlock);
           profs = data || [];
         }
 
@@ -191,16 +190,18 @@ function Overview() {
           .select("block_id, status, cadre_id")
           .eq("date", dateStr);
 
+        const cadreToBlockMap = new Map(profs.map((p) => [p.id, p.block_id]));
+
         blocksList = blocksData.map((b) => {
           const cadresInBlock = profs?.filter((p) => p.block_id === b.id) ?? [];
           const total = cadresInBlock.length;
 
           const presentAttInBlock =
-            atts?.filter((a) => a.block_id === b.id && a.status === "present") ?? [];
+            atts?.filter((a) => (a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) && a.status === "present") ?? [];
           const active = cadresInBlock.filter((p) => (p.status ?? "Active") === "Active").length;
           const inactive = cadresInBlock.filter((p) => p.status === "Inactive").length;
 
-          const actsInBlock = acts?.filter((a) => a.block_id === b.id) ?? [];
+          const actsInBlock = acts?.filter((a) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) ?? [];
           const activities = actsInBlock.length;
 
           const uniqueVillages = new Set(actsInBlock.map((a) => a.village_name));
@@ -231,15 +232,17 @@ function Overview() {
           village_name,
           activity_type,
           status,
-          submitted_at
+          submitted_at,
+          block_id
         `,
         )
         .order("submitted_at", { ascending: false })
         .limit(6);
-      if (blockId !== "all") {
-        recentQ = recentQ.eq("block_id", blockId);
+      if (blockId !== "all" && blockId) {
+        recentQ = applyScopeToQuery(recentQ, true, blockId, cadreIds);
       }
       const { data: dbRecent } = await recentQ;
+
 
       const recentCadreIds = Array.from(new Set((dbRecent ?? []).map((a) => a.cadre_id)));
       const recentProfilesMap = new Map();
@@ -386,10 +389,13 @@ function Overview() {
       // 1. Fetch attendance rows for today filtered by status (and block if set)
       let attQ = supabase
         .from("attendance")
-        .select("cadre_id, status, check_in_at")
+        .select("cadre_id, status, check_in_at, block_id")
         .eq("date", dateStr)
         .eq("status", attSheetStatus);
-      if (blockId !== "all") attQ = attQ.eq("block_id", blockId);
+      if (blockId !== "all" && blockId) {
+        const cadreIds = await getCadreIdsInBlock(blockId);
+        attQ = applyScopeToQuery(attQ, true, blockId, cadreIds);
+      }
       const { data: attRecords, error: attErr } = await attQ;
 
       console.log("[att-detail] attendance records:", attRecords?.length ?? 0, attRecords, attErr?.message);

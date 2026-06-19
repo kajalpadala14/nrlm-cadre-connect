@@ -22,6 +22,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-auth";
+import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { useT } from "@/lib/i18n";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
@@ -34,6 +35,7 @@ function ApprovalsPage() {
   const { t } = useT();
   const qc = useQueryClient();
   const { data: adminProfile } = useProfile();
+  const scope = getUserDataScope(adminProfile);
   const [workspaceTab, setWorkspaceTab] = useState<"activities" | "attendance">("activities");
   const [comments, setComments] = useState<Record<string, string>>({});
   const [selectedPhoto, setSelectedPhoto] = useState<any | null>(null);
@@ -47,12 +49,15 @@ function ApprovalsPage() {
     isLoading: isLoadingActivities,
     refetch: refetchActivities,
   } = useQuery({
-    queryKey: ["approvals-list"],
+    queryKey: ["approvals-list", scope.blockId ?? "all"],
+    enabled: scope.ready,
     queryFn: async () => {
-      const { data: activities, error: actError } = await supabase
-        .from("activities")
-        .select("*")
-        .order("submitted_at", { ascending: false });
+      let actQ = supabase.from("activities").select("*");
+      if (scope.isScoped && scope.blockId) {
+        const cadreIds = await getCadreIdsInBlock(scope.blockId);
+        actQ = applyScopeToQuery(actQ, true, scope.blockId, cadreIds);
+      }
+      const { data: activities, error: actError } = await actQ.order("submitted_at", { ascending: false });
       if (actError) throw actError;
 
       const activityRows = activities ?? [];
@@ -61,7 +66,7 @@ function ApprovalsPage() {
 
       const { data: profiles, error: profError } = await supabase
         .from("profiles")
-        .select("id, full_name, cadre_type")
+        .select("id, full_name, cadre_type, block_id")
         .in("id", cadreIds);
       if (profError) throw profError;
 
@@ -88,13 +93,14 @@ function ApprovalsPage() {
 
       return activityRows.map((a) => {
         const prof = profileMap.get(a.cadre_id);
+        const resolvedBlockId = a.block_id || prof?.block_id || "";
         const evidence = evidenceMap.get(a.id);
         return {
           id: a.id,
           evidence_id: evidence?.id ?? null,
           storage_path: evidence?.storage_path ?? null,
           cadre_id: a.cadre_id,
-          block_id: a.block_id,
+          block_id: resolvedBlockId,
           cadre_name: prof?.full_name || "Unknown Cadre",
           role: prof?.cadre_type || "PRP",
           date: a.activity_date,
@@ -107,7 +113,7 @@ function ApprovalsPage() {
           pdf: a.pdf_url || "",
           status: a.status as "Pending" | "Approved" | "Rejected",
           comment: a.comment || "",
-          block: blockMap.get(a.block_id ?? "") || "Unknown Block",
+          block: blockMap.get(resolvedBlockId) || "Unknown Block",
         };
       });
     },
@@ -119,13 +125,19 @@ function ApprovalsPage() {
     isLoading: isLoadingVerifications,
     refetch: refetchVerifications,
   } = useQuery({
-    queryKey: ["pending-verifications"],
+    queryKey: ["pending-verifications", scope.blockId ?? "all"],
+    enabled: scope.ready,
     queryFn: async () => {
-      const { data: attData, error: attError } = await supabase
+
+      let attQ = supabase
         .from("attendance")
         .select("*")
-        .eq("status", "pending_verification")
-        .order("date", { ascending: false });
+        .eq("status", "pending_verification");
+      if (scope.isScoped && scope.blockId) {
+        const cadreIds = await getCadreIdsInBlock(scope.blockId);
+        attQ = applyScopeToQuery(attQ, true, scope.blockId, cadreIds);
+      }
+      const { data: attData, error: attError } = await attQ.order("date", { ascending: false });
       if (attError) throw attError;
 
       if (attData.length === 0) return [];
