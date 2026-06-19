@@ -105,6 +105,15 @@ const fallbackBlocks: BlockOption[] = DANTEWADA_BLOCK_NAMES.map((name) => ({
 
 const isFallbackBlockId = (value: string) => value.startsWith(FALLBACK_BLOCK_PREFIX);
 
+const isPhotoGpsTag = (proof: PhotoGpsProof | null): proof is PhotoGpsTag =>
+  Boolean(
+    proof &&
+      "latitude" in proof &&
+      "longitude" in proof &&
+      Number.isFinite(proof.latitude) &&
+      Number.isFinite(proof.longitude),
+  );
+
 const readAscii = (view: DataView, offset: number, length: number) => {
   let value = "";
   for (let i = 0; i < length; i += 1) {
@@ -305,7 +314,7 @@ function SubmitPage() {
   // string → real coords captured from device
   const [gpsLocation, setGpsLocation] = useState<string | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"pending" | "granted" | "denied" | "unavailable">("pending");
-  const [autoAttendance, setAutoAttendance] = useState(true);
+  const [autoAttendance] = useState(true);
 
   // Attachments
   const [photos, setPhotos] = useState<File[]>([]);
@@ -366,6 +375,7 @@ function SubmitPage() {
   const selectedDbBlockId = selectedBlock && !selectedBlock.isFallback && !isFallbackBlockId(blockId)
     ? blockId
     : null;
+  const hasGeoTaggedPhoto = photoGpsTags.some(isPhotoGpsTag);
 
   useEffect(() => {
     if (blocksError) {
@@ -463,32 +473,31 @@ function SubmitPage() {
         return;
       }
 
-      // Try to extract GPS EXIF or detect stamped photos — but don't block upload
       const checkedPhotos = await Promise.all(
         filesArray.map(async (file) => {
           const gps = await parseExifGps(file);
-          const proof: PhotoGpsProof | null =
-            gps ??
-            ((await hasGpsMapCameraStamp(file)) ? ({ kind: "visual_stamp" } as const) : null);
-          return { file, proof };
+          return { file, proof: gps };
         }),
       );
+      const geoTaggedPhotos = checkedPhotos.filter(({ proof }) => isPhotoGpsTag(proof));
+      const rejectedCount = checkedPhotos.length - geoTaggedPhotos.length;
 
-      const validGpsTags = checkedPhotos.map(({ proof }) => proof as PhotoGpsProof);
-      setPhotos((prev) => [...prev, ...filesArray]);
-      setPhotoGpsTags((prev) => [...prev, ...validGpsTags]);
+      if (geoTaggedPhotos.length === 0) {
+        const message = "At least one photo with GPS latitude and longitude is required.";
+        setPhotoUploadError(message);
+        toast.error(message);
+        e.target.value = "";
+        return;
+      }
 
-      const newPreviews = filesArray.map((file) => URL.createObjectURL(file));
+      setPhotos((prev) => [...prev, ...geoTaggedPhotos.map(({ file }) => file)]);
+      setPhotoGpsTags((prev) => [...prev, ...geoTaggedPhotos.map(({ proof }) => proof)]);
+
+      const newPreviews = geoTaggedPhotos.map(({ file }) => URL.createObjectURL(file));
       setPhotoPreviews((prev) => [...prev, ...newPreviews]);
 
-      const gpsCount = checkedPhotos.filter(({ proof }) => proof).length;
-      if (gpsCount === filesArray.length) {
-        toast.success(`${filesArray.length} GPS-tagged photo(s) added.`);
-      } else {
-        toast.success(
-          `${filesArray.length} photo(s) added (${gpsCount} with GPS tag).`,
-        );
-      }
+      const rejectedSuffix = rejectedCount > 0 ? ` ${rejectedCount} photo(s) without GPS were skipped.` : "";
+      toast.success(`${geoTaggedPhotos.length} GPS-tagged photo(s) added.${rejectedSuffix}`);
       e.target.value = "";
     }
   };
@@ -547,20 +556,28 @@ function SubmitPage() {
     const checkedPhotos = await Promise.all(
       filesArray.map(async (file) => {
         const gps = await parseExifGps(file);
-        const proof: PhotoGpsProof | null =
-          gps ?? ((await hasGpsMapCameraStamp(file)) ? ({ kind: "visual_stamp" } as const) : null);
-        return { file, proof };
+        return { file, proof: gps };
       }),
     );
+    const geoTaggedPhotos = checkedPhotos.filter(({ proof }) => isPhotoGpsTag(proof));
+    const rejectedCount = checkedPhotos.length - geoTaggedPhotos.length;
 
-    const newPreviews = filesArray.map((file) => URL.createObjectURL(file));
+    if (geoTaggedPhotos.length === 0) {
+      const message = "At least one photo with GPS latitude and longitude is required.";
+      setPhotoUploadError(message);
+      toast.error(message);
+      e.target.value = "";
+      return;
+    }
+
+    const newPreviews = geoTaggedPhotos.map(({ file }) => URL.createObjectURL(file));
     photoPreviewUrlsRef.current.push(...newPreviews);
-    setPhotos((prev) => [...prev, ...filesArray]);
+    setPhotos((prev) => [...prev, ...geoTaggedPhotos.map(({ file }) => file)]);
     setPhotoPreviews((prev) => [...prev, ...newPreviews]);
-    setPhotoGpsTags((prev) => [...prev, ...checkedPhotos.map(({ proof }) => proof)]);
+    setPhotoGpsTags((prev) => [...prev, ...geoTaggedPhotos.map(({ proof }) => proof)]);
 
-    const gpsCount = checkedPhotos.filter(({ proof }) => proof).length;
-    toast.success(`${filesArray.length} photo(s) added (${gpsCount} with GPS tag).`);
+    const rejectedSuffix = rejectedCount > 0 ? ` ${rejectedCount} photo(s) without GPS were skipped.` : "";
+    toast.success(`${geoTaggedPhotos.length} GPS-tagged photo(s) added.${rejectedSuffix}`);
     e.target.value = "";
   };
 
@@ -628,6 +645,13 @@ function SubmitPage() {
       toast.error("सभी आवश्यक फ़ील्ड भरें / Please fill all required fields");
       return;
     }
+    if (!hasGeoTaggedPhoto) {
+      const message = "Geo-tagged photo is mandatory. Please upload at least one photo with GPS latitude and longitude.";
+      setPhotoUploadError(message);
+      console.warn("Form validation failed — missing geo-tagged photo:", { photos: photos.length, photoGpsTags });
+      toast.error(message);
+      return;
+    }
     if (beneficiaryCount < 0 || beneficiaryCount >= 1000) {
       console.warn("Form validation failed — beneficiary count:", beneficiaryCount);
       toast.error("लाभार्थी संख्या मान्य नहीं है / Beneficiary count must be positive and < 1000");
@@ -672,22 +696,9 @@ function SubmitPage() {
       console.log("[Submit] Starting. profile.id =", profile.id, "blockId =", blockId, "dbBlockId =", selectedDbBlockId);
       console.log("Starting photo upload");
 
-      // 1. Upload photos — non-blocking: if bucket missing or policy fails,
-      //    log the warning but continue with the activity insert.
       let photoUrl: string | null = null;
-      if (false && photos.length > 0) {
-        try {
-          photoUrl = (await uploadFile("activity-photos", photos[0], profile.id)).publicUrl;
-          console.log("[Submit] Photo uploaded:", photoUrl);
-          console.log("Photo upload completed");
-        } catch (uploadErr) {
-          console.warn("[Submit] Photo upload failed (non-fatal):", uploadErr);
-          toast.warning("फोटो अपलोड नहीं हुई, लेकिन गतिविधि सहेजी जाएगी / Photo upload failed, but activity will be saved.");
-          photoUrl = null;
-        }
-      }
 
-      // 2. Upload PDF — non-blocking
+      // PDF/document evidence is optional. Failure here should not block activity submission.
       let pdfUrl: string | null = null;
       if (pdfDoc) {
         try {
@@ -752,35 +763,59 @@ function SubmitPage() {
       console.log("[Submit] Activity inserted successfully.");
       console.log("Activity insert completed");
 
-      if (photos.length > 0 && insertedActivity?.id) {
-        try {
-          const photoUrls = await uploadActivityPhotos(insertedActivity.id, profile.id);
-          photoUrl = photoUrls[0] ?? null;
-          if (photoUrl) {
-            await supabase.from("activities").update({ photo_url: photoUrl }).eq("id", insertedActivity.id);
-          }
-          console.log("[Submit] Photos uploaded:", photoUrls.length);
-        } catch (uploadErr) {
-          console.warn("[Submit] Photo upload failed (non-fatal):", uploadErr);
-          toast.warning("Photo upload failed, but activity was saved.");
+      try {
+        const photoUrls = await uploadActivityPhotos(insertedActivity.id, profile.id);
+        photoUrl = photoUrls[0] ?? null;
+        if (!photoUrl) {
+          throw new Error("Geo-tagged photo upload did not create evidence.");
         }
+        if (photoUrl) {
+          const { error: photoUrlError } = await supabase
+            .from("activities")
+            .update({ photo_url: photoUrl })
+            .eq("id", insertedActivity.id);
+          if (photoUrlError) throw photoUrlError;
+        }
+        console.log("[Submit] Geo-tagged photos uploaded:", photoUrls.length);
+      } catch (uploadErr) {
+        console.warn("[Submit] Mandatory geo-tagged photo upload failed:", uploadErr);
+        const { error: cleanupError } = await (supabase.rpc as any)("delete_activity_with_consistency", {
+          p_activity_id: insertedActivity.id,
+        });
+        if (cleanupError) {
+          console.warn("[Submit] Cleanup RPC failed, falling back to direct activity delete:", cleanupError);
+          await supabase.from("activities").delete().eq("id", insertedActivity.id);
+        }
+        throw uploadErr instanceof Error
+          ? uploadErr
+          : new Error("Geo-tagged photo upload failed. Activity was not submitted.");
       }
 
-      // 5. Auto-attendance marking (only when a photo was uploaded)
-      if (autoAttendance && photoUrl) {
+      // 5. Auto-attendance marking is tied to geo-tagged photo evidence, not PDF upload.
+      if (autoAttendance) {
         try {
-          const { error: attendanceError } = await (supabase.rpc as any)(
+          const { data: attendanceId, error: attendanceError } = await (supabase.rpc as any)(
             "mark_activity_attendance",
             { p_activity_id: insertedActivity.id },
           );
           if (attendanceError) throw attendanceError;
+          if (!attendanceId) {
+            throw new Error("Attendance was not marked because geo-tagged photo evidence was not found.");
+          }
           toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
           console.log("Attendance insert completed");
         } catch (attErr) {
-          console.warn("[Submit] Attendance marking failed (non-fatal):", attErr);
+          console.warn("[Submit] Attendance marking failed:", attErr);
+          const { error: cleanupError } = await (supabase.rpc as any)("delete_activity_with_consistency", {
+            p_activity_id: insertedActivity.id,
+          });
+          if (cleanupError) {
+            console.warn("[Submit] Cleanup after attendance failure failed:", cleanupError);
+          }
+          throw attErr instanceof Error
+            ? attErr
+            : new Error("Attendance marking failed after geo-tagged photo upload.");
         }
-      } else if (autoAttendance && !photoUrl) {
-        toast.info("फोटो के बिना सबमिट किया गया — उपस्थिति मार्क नहीं की गई / Submitted without photo — attendance not marked");
       }
 
       invalidateConsistencyQueries(qc);
@@ -1112,7 +1147,7 @@ function SubmitPage() {
               >
                 <Camera className="h-6 w-6 text-slate-400" />
                 <span className="text-[10px] text-slate-400 mt-1.5">Snaps (Max 10 pics)</span>
-                <span className="text-[10px] text-emerald-600 mt-0.5">GPS geotag recommended</span>
+                <span className="text-[10px] text-emerald-600 mt-0.5">GPS geotag required</span>
               </button>
               <input
                 ref={photoInputRef}
@@ -1152,7 +1187,7 @@ function SubmitPage() {
             {/* PDF Document */}
             <div className="flex flex-col gap-1.5">
               <Label className="text-slate-500 font-bold">
-                दस्तावेज़ / PDF Attachment (Max 10MB)
+                दस्तावेज़ / PDF Attachment (Optional, Max 10MB)
               </Label>
               <label className="flex flex-col items-center justify-center h-28 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 cursor-pointer hover:border-blue-400 transition-colors">
                 <FileText className="h-6 w-6 text-slate-400" />
@@ -1181,13 +1216,14 @@ function SubmitPage() {
             <div className="leading-tight">
               <p className="font-bold text-slate-700">उपस्थिति स्वतः दर्ज / Auto-Mark Attendance</p>
               <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                Toggle auto marking present status on activity report submit
+                Attendance is automatically marked after geo-tagged photo evidence is submitted
               </p>
             </div>
             <input
               type="checkbox"
               checked={autoAttendance}
-              onChange={(e) => setAutoAttendance(e.target.checked)}
+              readOnly
+              aria-label="Attendance is automatically marked after geo-tagged photo evidence is submitted"
               className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
           </div>
