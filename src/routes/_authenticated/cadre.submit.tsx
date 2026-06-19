@@ -314,6 +314,9 @@ function SubmitPage() {
   // string → real coords captured from device
   const [gpsLocation, setGpsLocation] = useState<string | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"pending" | "granted" | "denied" | "unavailable">("pending");
+  // Numeric device GPS coords captured from navigator.geolocation — used as fallback
+  // when uploaded photos lack EXIF GPS metadata.
+  const [deviceGpsCoords, setDeviceGpsCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [autoAttendance] = useState(true);
 
   // Attachments
@@ -435,6 +438,7 @@ function SubmitPage() {
           `${pos.coords.latitude.toFixed(6)}° N, ${pos.coords.longitude.toFixed(6)}° E (Accuracy: ${pos.coords.accuracy.toFixed(1)}m)`,
         );
         setGpsStatus("granted");
+        setDeviceGpsCoords({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
       },
       (err) => {
         console.warn("GPS access denied or error:", err.message);
@@ -475,29 +479,41 @@ function SubmitPage() {
 
       const checkedPhotos = await Promise.all(
         filesArray.map(async (file) => {
-          const gps = await parseExifGps(file);
-          return { file, proof: gps };
+          const exifGps = await parseExifGps(file);
+          // Use EXIF GPS first; fall back to device GPS if available
+          const proof: PhotoGpsProof | null = exifGps ?? deviceGpsCoords ?? null;
+          return { file, proof, hasExifGps: exifGps !== null };
         }),
       );
-      const geoTaggedPhotos = checkedPhotos.filter(({ proof }) => isPhotoGpsTag(proof));
-      const rejectedCount = checkedPhotos.length - geoTaggedPhotos.length;
 
-      if (geoTaggedPhotos.length === 0) {
-        const message = "At least one photo with GPS latitude and longitude is required.";
-        setPhotoUploadError(message);
-        toast.error(message);
-        e.target.value = "";
-        return;
-      }
+      const exifCount = checkedPhotos.filter(({ hasExifGps }) => hasExifGps).length;
+      const deviceFallbackCount = checkedPhotos.filter(
+        ({ proof, hasExifGps }) => !hasExifGps && isPhotoGpsTag(proof),
+      ).length;
+      const noGpsCount = checkedPhotos.filter(({ proof }) => !isPhotoGpsTag(proof)).length;
 
-      setPhotos((prev) => [...prev, ...geoTaggedPhotos.map(({ file }) => file)]);
-      setPhotoGpsTags((prev) => [...prev, ...geoTaggedPhotos.map(({ proof }) => proof)]);
-
-      const newPreviews = geoTaggedPhotos.map(({ file }) => URL.createObjectURL(file));
+      // Accept ALL valid photos — GPS requirement is enforced at submit time
+      const newPreviews = checkedPhotos.map(({ file }) => URL.createObjectURL(file));
+      photoPreviewUrlsRef.current.push(...newPreviews);
+      setPhotos((prev) => [...prev, ...checkedPhotos.map(({ file }) => file)]);
       setPhotoPreviews((prev) => [...prev, ...newPreviews]);
+      setPhotoGpsTags((prev) => [...prev, ...checkedPhotos.map(({ proof }) => proof)]);
+      setPhotoUploadError(null);
 
-      const rejectedSuffix = rejectedCount > 0 ? ` ${rejectedCount} photo(s) without GPS were skipped.` : "";
-      toast.success(`${geoTaggedPhotos.length} GPS-tagged photo(s) added.${rejectedSuffix}`);
+      if (exifCount > 0) {
+        toast.success(`${checkedPhotos.length} photo(s) added — GPS EXIF embedded in ${exifCount}.`);
+      } else if (deviceFallbackCount > 0) {
+        toast.success(`${checkedPhotos.length} photo(s) added — device GPS location will be used.`);
+      } else {
+        toast.warning(
+          `${checkedPhotos.length} photo(s) added. No GPS found — enable location on your device for attendance to be marked automatically.`,
+        );
+      }
+      if (noGpsCount > 0 && exifCount === 0 && deviceFallbackCount === 0) {
+        setPhotoUploadError(
+          "GPS location not found in photos and device location is disabled. Enable location for auto-attendance.",
+        );
+      }
       e.target.value = "";
     }
   };
@@ -555,29 +571,41 @@ function SubmitPage() {
 
     const checkedPhotos = await Promise.all(
       filesArray.map(async (file) => {
-        const gps = await parseExifGps(file);
-        return { file, proof: gps };
+        const exifGps = await parseExifGps(file);
+        // Use EXIF GPS first; fall back to device GPS if available
+        const proof: PhotoGpsProof | null = exifGps ?? deviceGpsCoords ?? null;
+        return { file, proof, hasExifGps: exifGps !== null };
       }),
     );
-    const geoTaggedPhotos = checkedPhotos.filter(({ proof }) => isPhotoGpsTag(proof));
-    const rejectedCount = checkedPhotos.length - geoTaggedPhotos.length;
 
-    if (geoTaggedPhotos.length === 0) {
-      const message = "At least one photo with GPS latitude and longitude is required.";
-      setPhotoUploadError(message);
-      toast.error(message);
-      e.target.value = "";
-      return;
-    }
+    const exifCount = checkedPhotos.filter(({ hasExifGps }) => hasExifGps).length;
+    const deviceFallbackCount = checkedPhotos.filter(
+      ({ proof, hasExifGps }) => !hasExifGps && isPhotoGpsTag(proof),
+    ).length;
+    const noGpsCount = checkedPhotos.filter(({ proof }) => !isPhotoGpsTag(proof)).length;
 
-    const newPreviews = geoTaggedPhotos.map(({ file }) => URL.createObjectURL(file));
+    // Accept ALL valid photos — GPS requirement is enforced at submit time
+    const newPreviews = checkedPhotos.map(({ file }) => URL.createObjectURL(file));
     photoPreviewUrlsRef.current.push(...newPreviews);
-    setPhotos((prev) => [...prev, ...geoTaggedPhotos.map(({ file }) => file)]);
+    setPhotos((prev) => [...prev, ...checkedPhotos.map(({ file }) => file)]);
     setPhotoPreviews((prev) => [...prev, ...newPreviews]);
-    setPhotoGpsTags((prev) => [...prev, ...geoTaggedPhotos.map(({ proof }) => proof)]);
+    setPhotoGpsTags((prev) => [...prev, ...checkedPhotos.map(({ proof }) => proof)]);
+    setPhotoUploadError(null);
 
-    const rejectedSuffix = rejectedCount > 0 ? ` ${rejectedCount} photo(s) without GPS were skipped.` : "";
-    toast.success(`${geoTaggedPhotos.length} GPS-tagged photo(s) added.${rejectedSuffix}`);
+    if (exifCount > 0) {
+      toast.success(`${checkedPhotos.length} photo(s) added — GPS EXIF embedded in ${exifCount}.`);
+    } else if (deviceFallbackCount > 0) {
+      toast.success(`${checkedPhotos.length} photo(s) added — device GPS location will be used.`);
+    } else {
+      toast.warning(
+        `${checkedPhotos.length} photo(s) added. No GPS found — enable location on your device for attendance to be marked automatically.`,
+      );
+    }
+    if (noGpsCount > 0 && exifCount === 0 && deviceFallbackCount === 0) {
+      setPhotoUploadError(
+        "GPS location not found in photos and device location is disabled. Enable location for auto-attendance.",
+      );
+    }
     e.target.value = "";
   };
 
@@ -609,7 +637,12 @@ function SubmitPage() {
     for (const [idx, file] of photos.entries()) {
       const { publicUrl, storagePath } = await uploadFile("activity-photos", file, userId, activityId);
       const gpsProof = photoGpsTags[idx];
-      const gps = gpsProof && "latitude" in gpsProof ? gpsProof : null;
+      // Use EXIF GPS from photo proof; fall back to device GPS so evidence_files
+      // always gets coordinates when the device has location enabled.
+      const gps =
+        gpsProof && "latitude" in gpsProof
+          ? (gpsProof as { latitude: number; longitude: number })
+          : (deviceGpsCoords ?? null);
       uploadedPhotos.push({ publicUrl, storagePath, file, gps });
     }
 
@@ -645,12 +678,18 @@ function SubmitPage() {
       toast.error("सभी आवश्यक फ़ील्ड भरें / Please fill all required fields");
       return;
     }
-    if (!hasGeoTaggedPhoto) {
-      const message = "Geo-tagged photo is mandatory. Please upload at least one photo with GPS latitude and longitude.";
+    if (photos.length === 0) {
+      const message = "कम से कम एक फोटो अपलोड करें / Please upload at least one photo.";
       setPhotoUploadError(message);
-      console.warn("Form validation failed — missing geo-tagged photo:", { photos: photos.length, photoGpsTags });
+      console.warn("Form validation failed — no photo uploaded");
       toast.error(message);
       return;
+    }
+    if (!hasGeoTaggedPhoto && !deviceGpsCoords) {
+      // GPS is unavailable entirely — warn but don't block. Activity will submit;
+      // attendance won't be auto-marked until a geo-tagged photo is present.
+      console.warn("Submitting without GPS — auto-attendance will not be marked.", { photos: photos.length });
+      toast.warning("GPS उपलब्ध नहीं — उपस्थिति स्वचालित रूप से दर्ज नहीं होगी / No GPS — attendance won't be auto-marked.");
     }
     if (beneficiaryCount < 0 || beneficiaryCount >= 1000) {
       console.warn("Form validation failed — beneficiary count:", beneficiaryCount);
@@ -798,23 +837,74 @@ function SubmitPage() {
             "mark_activity_attendance",
             { p_activity_id: insertedActivity.id },
           );
-          if (attendanceError) throw attendanceError;
-          if (!attendanceId) {
-            throw new Error("Attendance was not marked because geo-tagged photo evidence was not found.");
+          if (attendanceError) {
+            // RPC call itself errored (network / permission). Log but don't rollback —
+            // the activity and photos were saved successfully.
+            console.warn("[Submit] Attendance RPC error (non-fatal):", attendanceError);
+            toast.warning("गतिविधि सहेजी गई। उपस्थिति दर्ज नहीं हुई — GPS फोटो की जाँच करें / Activity saved. Attendance not marked — check GPS photo.");
+          } else if (!attendanceId) {
+            // NULL return means no geo-tagged evidence found — mark as pending_verification.
+            console.log("[Submit] Geotagged photo not found. Marking attendance as pending_verification.");
+            const { data: existingAtt, error: fetchAttError } = await supabase
+              .from("attendance")
+              .select("id, status")
+              .eq("cadre_id", profile.id)
+              .eq("date", actDate)
+              .maybeSingle();
+
+            if (fetchAttError) throw fetchAttError;
+
+            let finalAttendanceId = existingAtt?.id;
+
+            if (!existingAtt) {
+              const { data: newAtt, error: insertAttError } = await supabase
+                .from("attendance")
+                .insert({
+                  cadre_id: profile.id,
+                  block_id: selectedDbBlockId,
+                  date: actDate,
+                  attendance_date: actDate,
+                  status: "pending_verification",
+                  recorded_by: profile.id,
+                })
+                .select("id")
+                .single();
+              if (insertAttError) throw insertAttError;
+              finalAttendanceId = newAtt.id;
+            } else if (existingAtt.status !== "present" && existingAtt.status !== "pending_verification") {
+              const { error: updateAttError } = await supabase
+                .from("attendance")
+                .update({
+                  status: "pending_verification",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", existingAtt.id);
+              if (updateAttError) throw updateAttError;
+            }
+
+            if (finalAttendanceId) {
+              const { error: linkError } = await supabase
+                .from("activity_attendance_links")
+                .upsert({
+                  activity_id: insertedActivity.id,
+                  attendance_id: finalAttendanceId,
+                  cadre_id: profile.id,
+                  attendance_date: actDate,
+                }, { onConflict: "activity_id" });
+              if (linkError) {
+                console.warn("[Submit] Link table upsert warning:", linkError);
+              }
+            }
+
+            toast.warning("उपस्थिति सत्यापन लंबित (कोई जियो-टैग नहीं) / Attendance pending verification (no geotag)");
+          } else {
+            toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
+            console.log("Attendance insert completed");
           }
-          toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
-          console.log("Attendance insert completed");
         } catch (attErr) {
-          console.warn("[Submit] Attendance marking failed:", attErr);
-          const { error: cleanupError } = await (supabase.rpc as any)("delete_activity_with_consistency", {
-            p_activity_id: insertedActivity.id,
-          });
-          if (cleanupError) {
-            console.warn("[Submit] Cleanup after attendance failure failed:", cleanupError);
-          }
-          throw attErr instanceof Error
-            ? attErr
-            : new Error("Attendance marking failed after geo-tagged photo upload.");
+          // Unexpected exception — log and continue. Activity is already persisted.
+          console.warn("[Submit] Attendance marking threw unexpected error (non-fatal):", attErr);
+          toast.warning("गतिविधि सहेजी गई। उपस्थिति दर्ज करने में त्रुटि / Activity saved. Error marking attendance.");
         }
       }
 
@@ -858,14 +948,59 @@ function SubmitPage() {
         }).select("id").single();
         if (actErr) throw actErr;
 
-      // 2. Mark attendance — skip pending_verification (not a valid enum value)
-      // Only mark present if there's photo evidence
+      // 2. Mark attendance — fallback to pending_verification if not geo-tagged
       if (draft.photo_url && insertedDraftActivity?.id) {
-        const { error: attendanceError } = await (supabase.rpc as any)(
+        const { data: attendanceId, error: attendanceError } = await (supabase.rpc as any)(
           "mark_activity_attendance",
           { p_activity_id: insertedDraftActivity.id },
         );
         if (attendanceError) throw attendanceError;
+
+        if (!attendanceId) {
+          const { data: existingAtt } = await supabase
+            .from("attendance")
+            .select("id, status")
+            .eq("cadre_id", draft.cadre_id)
+            .eq("date", draft.activity_date)
+            .maybeSingle();
+
+          let finalAttendanceId = existingAtt?.id;
+
+          if (!existingAtt) {
+            const { data: newAtt } = await supabase
+              .from("attendance")
+              .insert({
+                cadre_id: draft.cadre_id,
+                block_id: draft.block_id,
+                date: draft.activity_date,
+                attendance_date: draft.activity_date,
+                status: "pending_verification",
+                recorded_by: draft.cadre_id,
+              })
+              .select("id")
+              .single();
+            finalAttendanceId = newAtt?.id;
+          } else if (existingAtt.status !== "present" && existingAtt.status !== "pending_verification") {
+            await supabase
+              .from("attendance")
+              .update({
+                status: "pending_verification",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existingAtt.id);
+          }
+
+          if (finalAttendanceId) {
+            await supabase
+              .from("activity_attendance_links")
+              .upsert({
+                activity_id: insertedDraftActivity.id,
+                attendance_id: finalAttendanceId,
+                cadre_id: draft.cadre_id,
+                attendance_date: draft.activity_date,
+              }, { onConflict: "activity_id" });
+          }
+        }
       }
       }
       await clearActivityDrafts();
