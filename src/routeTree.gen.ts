@@ -19,6 +19,7 @@ import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedCadreIndexRouteImport } from './routes/_authenticated/cadre.index'
 import { Route as AuthenticatedDashboardUsersRouteImport } from './routes/_authenticated/dashboard.users'
 import { Route as AuthenticatedDashboardReportsRouteImport } from './routes/_authenticated/dashboard.reports'
+import { Route as AuthenticatedDashboardLeaveRouteImport } from './routes/_authenticated/dashboard.leave'
 import { Route as AuthenticatedDashboardHelpRouteImport } from './routes/_authenticated/dashboard.help'
 import { Route as AuthenticatedDashboardEvidenceRouteImport } from './routes/_authenticated/dashboard.evidence'
 import { Route as AuthenticatedDashboardAttendanceRouteImport } from './routes/_authenticated/dashboard.attendance'
@@ -27,6 +28,7 @@ import { Route as AuthenticatedDashboardActivitiesRouteImport } from './routes/_
 import { Route as AuthenticatedCadreSubmitRouteImport } from './routes/_authenticated/cadre.submit'
 import { Route as AuthenticatedCadreProfileRouteImport } from './routes/_authenticated/cadre.profile'
 import { Route as AuthenticatedCadreNotificationsRouteImport } from './routes/_authenticated/cadre.notifications'
+import { Route as AuthenticatedCadreLeaveRouteImport } from './routes/_authenticated/cadre.leave'
 import { Route as AuthenticatedCadreHistoryRouteImport } from './routes/_authenticated/cadre.history'
 import { Route as AuthenticatedCadreHelpRouteImport } from './routes/_authenticated/cadre.help'
 
@@ -82,6 +84,12 @@ const AuthenticatedDashboardReportsRoute =
     path: '/reports',
     getParentRoute: () => AuthenticatedDashboardRoute,
   } as any)
+const AuthenticatedDashboardLeaveRoute =
+  AuthenticatedDashboardLeaveRouteImport.update({
+    id: '/leave',
+    path: '/leave',
+    getParentRoute: () => AuthenticatedDashboardRoute,
+  } as any)
 const AuthenticatedDashboardHelpRoute =
   AuthenticatedDashboardHelpRouteImport.update({
     id: '/help',
@@ -130,6 +138,11 @@ const AuthenticatedCadreNotificationsRoute =
     path: '/notifications',
     getParentRoute: () => AuthenticatedCadreRoute,
   } as any)
+const AuthenticatedCadreLeaveRoute = AuthenticatedCadreLeaveRouteImport.update({
+  id: '/leave',
+  path: '/leave',
+  getParentRoute: () => AuthenticatedCadreRoute,
+} as any)
 const AuthenticatedCadreHistoryRoute =
   AuthenticatedCadreHistoryRouteImport.update({
     id: '/history',
@@ -150,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof AuthenticatedHomeRoute
   '/cadre/help': typeof AuthenticatedCadreHelpRoute
   '/cadre/history': typeof AuthenticatedCadreHistoryRoute
+  '/cadre/leave': typeof AuthenticatedCadreLeaveRoute
   '/cadre/notifications': typeof AuthenticatedCadreNotificationsRoute
   '/cadre/profile': typeof AuthenticatedCadreProfileRoute
   '/cadre/submit': typeof AuthenticatedCadreSubmitRoute
@@ -158,6 +172,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/attendance': typeof AuthenticatedDashboardAttendanceRoute
   '/dashboard/evidence': typeof AuthenticatedDashboardEvidenceRoute
   '/dashboard/help': typeof AuthenticatedDashboardHelpRoute
+  '/dashboard/leave': typeof AuthenticatedDashboardLeaveRoute
   '/dashboard/reports': typeof AuthenticatedDashboardReportsRoute
   '/dashboard/users': typeof AuthenticatedDashboardUsersRoute
   '/cadre/': typeof AuthenticatedCadreIndexRoute
@@ -169,6 +184,7 @@ export interface FileRoutesByTo {
   '/home': typeof AuthenticatedHomeRoute
   '/cadre/help': typeof AuthenticatedCadreHelpRoute
   '/cadre/history': typeof AuthenticatedCadreHistoryRoute
+  '/cadre/leave': typeof AuthenticatedCadreLeaveRoute
   '/cadre/notifications': typeof AuthenticatedCadreNotificationsRoute
   '/cadre/profile': typeof AuthenticatedCadreProfileRoute
   '/cadre/submit': typeof AuthenticatedCadreSubmitRoute
@@ -177,6 +193,7 @@ export interface FileRoutesByTo {
   '/dashboard/attendance': typeof AuthenticatedDashboardAttendanceRoute
   '/dashboard/evidence': typeof AuthenticatedDashboardEvidenceRoute
   '/dashboard/help': typeof AuthenticatedDashboardHelpRoute
+  '/dashboard/leave': typeof AuthenticatedDashboardLeaveRoute
   '/dashboard/reports': typeof AuthenticatedDashboardReportsRoute
   '/dashboard/users': typeof AuthenticatedDashboardUsersRoute
   '/cadre': typeof AuthenticatedCadreIndexRoute
@@ -192,6 +209,7 @@ export interface FileRoutesById {
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/cadre/help': typeof AuthenticatedCadreHelpRoute
   '/_authenticated/cadre/history': typeof AuthenticatedCadreHistoryRoute
+  '/_authenticated/cadre/leave': typeof AuthenticatedCadreLeaveRoute
   '/_authenticated/cadre/notifications': typeof AuthenticatedCadreNotificationsRoute
   '/_authenticated/cadre/profile': typeof AuthenticatedCadreProfileRoute
   '/_authenticated/cadre/submit': typeof AuthenticatedCadreSubmitRoute
@@ -200,6 +218,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/attendance': typeof AuthenticatedDashboardAttendanceRoute
   '/_authenticated/dashboard/evidence': typeof AuthenticatedDashboardEvidenceRoute
   '/_authenticated/dashboard/help': typeof AuthenticatedDashboardHelpRoute
+  '/_authenticated/dashboard/leave': typeof AuthenticatedDashboardLeaveRoute
   '/_authenticated/dashboard/reports': typeof AuthenticatedDashboardReportsRoute
   '/_authenticated/dashboard/users': typeof AuthenticatedDashboardUsersRoute
   '/_authenticated/cadre/': typeof AuthenticatedCadreIndexRoute
@@ -215,6 +234,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/cadre/help'
     | '/cadre/history'
+    | '/cadre/leave'
     | '/cadre/notifications'
     | '/cadre/profile'
     | '/cadre/submit'
@@ -223,6 +243,7 @@ export interface FileRouteTypes {
     | '/dashboard/attendance'
     | '/dashboard/evidence'
     | '/dashboard/help'
+    | '/dashboard/leave'
     | '/dashboard/reports'
     | '/dashboard/users'
     | '/cadre/'
@@ -234,6 +255,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/cadre/help'
     | '/cadre/history'
+    | '/cadre/leave'
     | '/cadre/notifications'
     | '/cadre/profile'
     | '/cadre/submit'
@@ -242,6 +264,7 @@ export interface FileRouteTypes {
     | '/dashboard/attendance'
     | '/dashboard/evidence'
     | '/dashboard/help'
+    | '/dashboard/leave'
     | '/dashboard/reports'
     | '/dashboard/users'
     | '/cadre'
@@ -256,6 +279,7 @@ export interface FileRouteTypes {
     | '/_authenticated/home'
     | '/_authenticated/cadre/help'
     | '/_authenticated/cadre/history'
+    | '/_authenticated/cadre/leave'
     | '/_authenticated/cadre/notifications'
     | '/_authenticated/cadre/profile'
     | '/_authenticated/cadre/submit'
@@ -264,6 +288,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/attendance'
     | '/_authenticated/dashboard/evidence'
     | '/_authenticated/dashboard/help'
+    | '/_authenticated/dashboard/leave'
     | '/_authenticated/dashboard/reports'
     | '/_authenticated/dashboard/users'
     | '/_authenticated/cadre/'
@@ -348,6 +373,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardReportsRouteImport
       parentRoute: typeof AuthenticatedDashboardRoute
     }
+    '/_authenticated/dashboard/leave': {
+      id: '/_authenticated/dashboard/leave'
+      path: '/leave'
+      fullPath: '/dashboard/leave'
+      preLoaderRoute: typeof AuthenticatedDashboardLeaveRouteImport
+      parentRoute: typeof AuthenticatedDashboardRoute
+    }
     '/_authenticated/dashboard/help': {
       id: '/_authenticated/dashboard/help'
       path: '/help'
@@ -404,6 +436,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCadreNotificationsRouteImport
       parentRoute: typeof AuthenticatedCadreRoute
     }
+    '/_authenticated/cadre/leave': {
+      id: '/_authenticated/cadre/leave'
+      path: '/leave'
+      fullPath: '/cadre/leave'
+      preLoaderRoute: typeof AuthenticatedCadreLeaveRouteImport
+      parentRoute: typeof AuthenticatedCadreRoute
+    }
     '/_authenticated/cadre/history': {
       id: '/_authenticated/cadre/history'
       path: '/history'
@@ -424,6 +463,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedCadreRouteChildren {
   AuthenticatedCadreHelpRoute: typeof AuthenticatedCadreHelpRoute
   AuthenticatedCadreHistoryRoute: typeof AuthenticatedCadreHistoryRoute
+  AuthenticatedCadreLeaveRoute: typeof AuthenticatedCadreLeaveRoute
   AuthenticatedCadreNotificationsRoute: typeof AuthenticatedCadreNotificationsRoute
   AuthenticatedCadreProfileRoute: typeof AuthenticatedCadreProfileRoute
   AuthenticatedCadreSubmitRoute: typeof AuthenticatedCadreSubmitRoute
@@ -433,6 +473,7 @@ interface AuthenticatedCadreRouteChildren {
 const AuthenticatedCadreRouteChildren: AuthenticatedCadreRouteChildren = {
   AuthenticatedCadreHelpRoute: AuthenticatedCadreHelpRoute,
   AuthenticatedCadreHistoryRoute: AuthenticatedCadreHistoryRoute,
+  AuthenticatedCadreLeaveRoute: AuthenticatedCadreLeaveRoute,
   AuthenticatedCadreNotificationsRoute: AuthenticatedCadreNotificationsRoute,
   AuthenticatedCadreProfileRoute: AuthenticatedCadreProfileRoute,
   AuthenticatedCadreSubmitRoute: AuthenticatedCadreSubmitRoute,
@@ -448,6 +489,7 @@ interface AuthenticatedDashboardRouteChildren {
   AuthenticatedDashboardAttendanceRoute: typeof AuthenticatedDashboardAttendanceRoute
   AuthenticatedDashboardEvidenceRoute: typeof AuthenticatedDashboardEvidenceRoute
   AuthenticatedDashboardHelpRoute: typeof AuthenticatedDashboardHelpRoute
+  AuthenticatedDashboardLeaveRoute: typeof AuthenticatedDashboardLeaveRoute
   AuthenticatedDashboardReportsRoute: typeof AuthenticatedDashboardReportsRoute
   AuthenticatedDashboardUsersRoute: typeof AuthenticatedDashboardUsersRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
@@ -462,6 +504,7 @@ const AuthenticatedDashboardRouteChildren: AuthenticatedDashboardRouteChildren =
       AuthenticatedDashboardAttendanceRoute,
     AuthenticatedDashboardEvidenceRoute: AuthenticatedDashboardEvidenceRoute,
     AuthenticatedDashboardHelpRoute: AuthenticatedDashboardHelpRoute,
+    AuthenticatedDashboardLeaveRoute: AuthenticatedDashboardLeaveRoute,
     AuthenticatedDashboardReportsRoute: AuthenticatedDashboardReportsRoute,
     AuthenticatedDashboardUsersRoute: AuthenticatedDashboardUsersRoute,
     AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,

@@ -883,7 +883,7 @@ function SubmitPage() {
             }
 
             if (finalAttendanceId) {
-              const { error: linkError } = await supabase
+              const { error: linkError } = await (supabase as any)
                 .from("activity_attendance_links")
                 .upsert({
                   activity_id: insertedActivity.id,
@@ -991,7 +991,7 @@ function SubmitPage() {
           }
 
           if (finalAttendanceId) {
-            await supabase
+            await (supabase as any)
               .from("activity_attendance_links")
               .upsert({
                 activity_id: insertedDraftActivity.id,

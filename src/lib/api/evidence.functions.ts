@@ -233,7 +233,7 @@ export const deleteEvidenceFile = createServerFn({ method: "POST" })
     }
 
     // Delete from DB
-    const { error } = await supabase.rpc(
+    const { error } = await (supabase.rpc as any)(
       "delete_evidence_with_consistency",
       { p_evidence_id: data.evidence_id },
     );

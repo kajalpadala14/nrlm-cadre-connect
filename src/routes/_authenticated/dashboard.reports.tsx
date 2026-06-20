@@ -25,7 +25,7 @@ export const Route = createFileRoute("/_authenticated/dashboard/reports")({
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────
-type ReportTab = "attendance" | "activity" | "cadre_performance" | "block_performance";
+type ReportTab = "attendance" | "activity" | "cadre_performance" | "block_performance" | "leaves";
 
 type Preset = "today" | "this_week" | "this_month" | "last_month" | "custom";
 
@@ -156,7 +156,7 @@ function ReportTable({
 
 // ─── Main Page ────────────────────────────────────────────────────────────
 function ReportsPage() {
-  const { t } = useT();
+  const { t, lang } = useT();
   useActivityCacheSync();
   const { data: profile } = useProfile();
   const scope = getUserDataScope(profile);
@@ -205,6 +205,7 @@ function ReportsPage() {
     { id: "activity",          label: t("tab_activity_label") },
     { id: "cadre_performance", label: t("tab_cadre_perf_label") },
     { id: "block_performance", label: t("tab_block_perf_label") },
+    { id: "leaves",            label: lang === "hi" ? "अवकाश रिपोर्ट" : "Leave Reports" },
   ];
 
   const PRESETS: { id: Preset; label: string }[] = [
@@ -330,6 +331,9 @@ function ReportsPage() {
       )}
       {activeTab === "block_performance" && effectiveBlock !== undefined && (
         <BlockPerformanceReport from={from} to={to} blockId={effectiveBlock} />
+      )}
+      {activeTab === "leaves" && effectiveBlock !== undefined && (
+        <LeavesReport from={from} to={to} blockId={effectiveBlock} />
       )}
     </div>
   );
@@ -977,5 +981,198 @@ function ReportPanel({
         )}
       </div>
     </div>
+  );
+}
+
+// ─── LEAVES REPORT ────────────────────────────────────────────────────────
+const LEAVE_TYPES = [
+  { value: "Casual", labelEn: "Casual Leave", labelHi: "आकस्मिक अवकाश" },
+  { value: "Sick", labelEn: "Sick Leave", labelHi: "चिकित्सा अवकाश" },
+  { value: "Official", labelEn: "Official Duty", labelHi: "आधिकारिक कार्य" },
+  { value: "Training", labelEn: "Training", labelHi: "प्रशिक्षण" },
+  { value: "Emergency", labelEn: "Emergency Leave", labelHi: "आपातकालीन अवकाश" },
+];
+
+function LeavesReport({ from, to, blockId }: { from: string; to: string; blockId: string | null }) {
+  const { lang } = useT();
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [leaveTypeFilter, setLeaveTypeFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const { data: raw = [], isLoading } = useQuery({
+    queryKey: ["rpt-leaves", from, to, blockId],
+    queryFn: async () => {
+      let q = supabase
+        .from("leave_requests")
+        .select(`
+          id,
+          leave_type,
+          from_date,
+          to_date,
+          total_days,
+          reason,
+          status,
+          approved_by,
+          approval_remarks,
+          profiles:cadre_id(full_name, cadre_type, village, blocks(name)),
+          blocks(name)
+        `)
+        .gte("from_date", from)
+        .lte("to_date", to)
+        .order("from_date", { ascending: false })
+        .limit(5000);
+
+      if (blockId) {
+        q = q.eq("block_id", blockId);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: staffList = [] } = useQuery({
+    queryKey: ["staff-profiles-list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const staffNameMap = useMemo(() => {
+    return new Map(staffList.map((s) => [s.id, s.full_name]));
+  }, [staffList]);
+
+  const getLeaveTypeLabel = (val: string) => {
+    const found = LEAVE_TYPES.find((l) => l.value === val);
+    if (!found) return val;
+    return lang === "hi" ? found.labelHi : found.labelEn;
+  };
+
+  const rows = useMemo(() => {
+    return raw.filter((r: any) => {
+      const name: string = r.profiles?.full_name ?? "";
+      const s = r.status ?? "";
+      const leaveType = r.leave_type ?? "";
+      if (statusFilter !== "all" && s !== statusFilter) return false;
+      if (leaveTypeFilter !== "all" && leaveType !== leaveTypeFilter) return false;
+      if (search && !name.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [raw, statusFilter, leaveTypeFilter, search]);
+
+  const tableHeaders = [
+    lang === "hi" ? "तारीख" : "Applied Date",
+    lang === "hi" ? "कैडर नाम" : "Cadre Name",
+    lang === "hi" ? "कैडर प्रकार" : "Cadre Type",
+    lang === "hi" ? "ब्लॉक" : "Block",
+    lang === "hi" ? "अवकाश प्रकार" : "Leave Type",
+    lang === "hi" ? "कब से" : "From Date",
+    lang === "hi" ? "कब तक" : "To Date",
+    lang === "hi" ? "कुल दिन" : "Total Days",
+    lang === "hi" ? "स्थिति" : "Status",
+    lang === "hi" ? "कारण" : "Reason",
+    lang === "hi" ? "समीक्षक" : "Reviewed By",
+    lang === "hi" ? "टिप्पणी" : "Remarks"
+  ];
+
+  const tableRows = rows.slice(0, 200).map((r: any) => {
+    const p = r.profiles ?? {};
+    const reviewerName = r.approved_by ? (staffNameMap.get(r.approved_by) ?? "Staff") : "—";
+    const dateStr = new Date(r.from_date).toLocaleDateString();
+    return [
+      dateStr,
+      p.full_name ?? "—",
+      p.cadre_type ?? "—",
+      r.blocks?.name ?? p.blocks?.name ?? "—",
+      getLeaveTypeLabel(r.leave_type),
+      r.from_date,
+      r.to_date,
+      r.total_days,
+      r.status,
+      r.reason ?? "—",
+      reviewerName,
+      r.approval_remarks ?? "—"
+    ];
+  });
+
+  function buildExportRows() {
+    return rows.map((r: any) => {
+      const p = r.profiles ?? {};
+      const reviewerName = r.approved_by ? (staffNameMap.get(r.approved_by) ?? "Staff") : "";
+      return {
+        "Applied Date": new Date(r.from_date).toLocaleDateString(),
+        "Cadre Name": p.full_name ?? "",
+        "Cadre Type": p.cadre_type ?? "",
+        "Block": r.blocks?.name ?? p.blocks?.name ?? "",
+        "Leave Type": getLeaveTypeLabel(r.leave_type),
+        "From Date": r.from_date,
+        "To Date": r.to_date,
+        "Total Days": r.total_days,
+        "Status": r.status,
+        "Reason": r.reason ?? "",
+        "Reviewed By": reviewerName,
+        "Remarks": r.approval_remarks ?? "",
+      };
+    });
+  }
+
+  const slug = `leaves-report-${fmt(from)}-to-${fmt(to)}`;
+
+  return (
+    <ReportPanel
+      title={lang === "hi" ? "अवकाश रिपोर्ट" : "Leave Report"}
+      from={from} to={to} isLoading={isLoading}
+      totalRows={rows.length}
+      onExcelExport={() => exportToExcel(buildExportRows(), `${slug}.xlsx`, "Leaves")}
+      onCsvExport={() => exportCSV(buildExportRows(), `${slug}.csv`)}
+      extraFilters={
+        <div className="flex flex-wrap gap-3">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs font-bold text-slate-500">{lang === "hi" ? "स्थिति" : "Status"}</Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-9 w-40 rounded-lg border-slate-200 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{lang === "hi" ? "सभी स्थितियां" : "All Statuses"}</SelectItem>
+                <SelectItem value="pending">{lang === "hi" ? "लंबित" : "Pending"}</SelectItem>
+                <SelectItem value="approved">{lang === "hi" ? "स्वीकृत" : "Approved"}</SelectItem>
+                <SelectItem value="rejected">{lang === "hi" ? "अस्वीकृत" : "Rejected"}</SelectItem>
+                <SelectItem value="cancelled">{lang === "hi" ? "रद्द" : "Cancelled"}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs font-bold text-slate-500">{lang === "hi" ? "अवकाश प्रकार" : "Leave Type"}</Label>
+            <Select value={leaveTypeFilter} onValueChange={setLeaveTypeFilter}>
+              <SelectTrigger className="h-9 w-48 rounded-lg border-slate-200 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{lang === "hi" ? "सभी अवकाश प्रकार" : "All Leave Types"}</SelectItem>
+                {LEAVE_TYPES.map((lt) => (
+                  <SelectItem key={lt.value} value={lt.value}>
+                    {lang === "hi" ? lt.labelHi : lt.labelEn}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs font-bold text-slate-500">{lang === "hi" ? "कैडर खोजें" : "Search Cadre"}</Label>
+            <div className="relative">
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={lang === "hi" ? "नाम..." : "Name..."} className="h-9 w-44 rounded-lg border-slate-200 text-xs pl-8" />
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <ReportTable
+        headers={tableHeaders}
+        rows={tableRows}
+        footer={rows.length > 200 ? `Showing 200 of ${rows.length}. Use Export for full data.` : undefined}
+      />
+    </ReportPanel>
   );
 }

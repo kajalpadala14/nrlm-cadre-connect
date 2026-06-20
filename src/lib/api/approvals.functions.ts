@@ -220,7 +220,6 @@ export const bulkApprove = createServerFn({ method: "POST" })
 
     return { ok: true, approved_count: approvalIds.length };
   });
-
 // ─── LEAVE REQUEST MANAGEMENT ────────────────────────────────
 
 export const applyForLeave = createServerFn({ method: "POST" })
@@ -228,19 +227,25 @@ export const applyForLeave = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) =>
     z
       .object({
-        leave_type: z.enum(["casual", "sick", "earned", "emergency", "other"]),
-        start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        reason: z.string().max(500).optional().nullable(),
+        leave_type: z.string(),
+        from_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        to_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        reason: z.string().max(500),
+        attachment_url: z.string().optional().nullable(),
       })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
-    if (data.end_date < data.start_date) {
-      throw new Error("end_date must be >= start_date");
+    if (data.to_date < data.from_date) {
+      throw new Error("to_date must be >= from_date");
     }
+
+    // Calculate total days inclusive
+    const start = new Date(data.from_date);
+    const end = new Date(data.to_date);
+    const total_days = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
     const { data: profile } = await supabase
       .from("profiles")
@@ -254,11 +259,14 @@ export const applyForLeave = createServerFn({ method: "POST" })
         cadre_id: userId,
         block_id: profile?.block_id ?? null,
         leave_type: data.leave_type,
-        start_date: data.start_date,
-        end_date: data.end_date,
-        reason: data.reason ?? null,
+        from_date: data.from_date,
+        to_date: data.to_date,
+        total_days,
+        reason: data.reason,
+        attachment_url: data.attachment_url ?? null,
+        status: "pending",
       })
-      .select("id, status, start_date, end_date")
+      .select("id, status, from_date, to_date, total_days")
       .single();
 
     if (error) throw new Error(`Leave error: ${error.message}`);
@@ -272,7 +280,7 @@ export const reviewLeave = createServerFn({ method: "POST" })
       .object({
         leave_id: z.string().uuid(),
         action: z.enum(["approved", "rejected"]),
-        reviewer_remarks: z.string().max(500).optional().nullable(),
+        approval_remarks: z.string().max(500).optional().nullable(),
       })
       .parse(data),
   )
@@ -293,39 +301,55 @@ export const reviewLeave = createServerFn({ method: "POST" })
       .from("leave_requests")
       .update({
         status: data.action,
-        reviewer_id: userId,
-        reviewer_remarks: data.reviewer_remarks ?? null,
-        reviewed_at: new Date().toISOString(),
+        approved_by: userId,
+        approval_remarks: data.approval_remarks ?? null,
+        approved_at: new Date().toISOString(),
       })
       .eq("id", data.leave_id)
-      .select("cadre_id, block_id, start_date, end_date")
+      .select("cadre_id, block_id, from_date, to_date, status")
       .single();
 
     if (error) throw new Error(`Leave review error: ${error.message}`);
 
-    // If approved, update attendance records for the leave period to 'on_leave'
-    if (data.action === "approved") {
-      // Generate all dates in the leave range
-      const start = new Date(leave.start_date);
-      const end = new Date(leave.end_date);
-      const attendanceRecords = [];
+    return { ok: true, status: data.action, leave };
+  });
 
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        attendanceRecords.push({
-          cadre_id: leave.cadre_id,
-          block_id: leave.block_id,
-          date: d.toISOString().slice(0, 10),
-          status: "on_leave" as const,
-          recorded_by: userId,
-        });
-      }
+export const cancelLeave = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z
+      .object({
+        leave_id: z.string().uuid(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
 
-      if (attendanceRecords.length > 0) {
-        await supabase
-          .from("attendance")
-          .upsert(attendanceRecords, { onConflict: "cadre_id,date" });
-      }
+    // Check that the request belongs to this user and is still pending
+    const { data: existingLeave, error: existingLeaveError } = await supabase
+      .from("leave_requests")
+      .select("cadre_id, status")
+      .eq("id", data.leave_id)
+      .single();
+
+    if (existingLeaveError) throw new Error(`Leave cancel error: ${existingLeaveError.message}`);
+    if (existingLeave.cadre_id !== userId) {
+      throw new Error("You can only cancel your own leave requests");
+    }
+    if (existingLeave.status !== "pending") {
+      throw new Error("You can only cancel pending leave requests");
     }
 
-    return { ok: true, status: data.action };
+    const { data: leave, error } = await supabase
+      .from("leave_requests")
+      .update({
+        status: "cancelled",
+      })
+      .eq("id", data.leave_id)
+      .select("id, status")
+      .single();
+
+    if (error) throw new Error(`Leave cancel error: ${error.message}`);
+    return { ok: true, leave };
   });

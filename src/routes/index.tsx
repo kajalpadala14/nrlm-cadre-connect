@@ -339,7 +339,7 @@ function PublicIndex() {
           <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
             <h3 className="text-sm font-black text-slate-800">Activity Trend</h3>
             <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5 mb-4">
-              गतिविधि ट्रेंड / Last 30 days
+              गतिविधि ट्रेंड / Daily — Last 30 days
             </p>
             {trendLoading ? <Skeleton className="h-52 w-full" /> : (
               <ResponsiveContainer width="100%" height={220}>
@@ -355,9 +355,23 @@ function PublicIndex() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="label" tick={{ fontSize: 9, fontWeight: 700, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fontWeight: 700, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 9, fontWeight: 700, fill: "#94a3b8" }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval={0}
+                  />
+                  <YAxis tick={{ fontSize: 9, fontWeight: 700, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                    labelFormatter={(_, payload) => {
+                      if (payload && payload[0]?.payload?.day) {
+                        return new Date(payload[0].payload.day).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+                      }
+                      return "";
+                    }}
+                  />
                   <Legend wrapperStyle={{ fontSize: 9, fontWeight: 700 }} />
                   <Area type="monotone" dataKey="total" stroke="#0055A4" strokeWidth={2} fill="url(#pub-totalGrad)" name="Total" />
                   <Area type="monotone" dataKey="approved" stroke="#10b981" strokeWidth={2} fill="url(#pub-approvedGrad)" name="Approved" />
@@ -425,15 +439,20 @@ function PublicIndex() {
 
           {/* Block table */}
           <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-5">
-              <BarChart2 className="h-4 w-4 text-[#0055A4]" />
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
-                Block-wise Summary
-              </h3>
+            <div className="flex items-center justify-between gap-2 mb-5">
+              <div className="flex items-center gap-2">
+                <BarChart2 className="h-4 w-4 text-[#0055A4]" />
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                  Block-wise Summary
+                </h3>
+              </div>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">
+                Today's Attendance
+              </span>
             </div>
             {blockLoading ? (
               <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-full rounded-lg" />)}
+                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -443,24 +462,45 @@ function PublicIndex() {
                       <th className="pb-2 text-left">Block</th>
                       <th className="pb-2 text-center">Cadres</th>
                       <th className="pb-2 text-center">Activities</th>
-                      <th className="pb-2 text-center">Approved</th>
+                      <th className="pb-2 text-center">Villages</th>
+                      <th className="pb-2 text-center">Att. Rate</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(blockData ?? []).map((b, i) => (
-                      <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
-                        <td className="py-2.5 font-bold text-slate-700">{b.fullName}</td>
-                        <td className="py-2.5 text-center text-slate-600">{b.cadres}</td>
-                        <td className="py-2.5 text-center text-slate-600">{b.activities}</td>
-                        <td className="py-2.5 text-center">
-                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">
-                            {b.approved}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {(blockData ?? []).map((b, i) => {
+                      const rate = (b as any).attendanceRate ?? 0;
+                      const rateColor =
+                        rate >= 75 ? "bg-emerald-50 text-emerald-700" :
+                        rate >= 40 ? "bg-amber-50 text-amber-700" :
+                        "bg-rose-50 text-rose-700";
+                      return (
+                        <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3 font-bold text-slate-700">
+                            <div className="flex flex-col gap-0.5">
+                              <span>{b.fullName}</span>
+                              <span className="text-[9px] font-semibold text-slate-400">
+                                {(b as any).villages ?? 0} villages · {b.cadres} active cadres
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-center text-slate-600 font-bold">{b.cadres}</td>
+                          <td className="py-3 text-center">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className="text-slate-700 font-bold">{b.activities}</span>
+                              <span className="text-[9px] text-emerald-600 font-bold">{b.approved} ✓</span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-center text-slate-600">{(b as any).villages ?? 0}</td>
+                          <td className="py-3 text-center">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black ${rateColor}`}>
+                              {rate}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {(blockData ?? []).length === 0 && (
-                      <tr><td colSpan={4} className="py-6 text-center text-slate-400 italic">No block data available</td></tr>
+                      <tr><td colSpan={5} className="py-6 text-center text-slate-400 italic">No block data available</td></tr>
                     )}
                   </tbody>
                 </table>

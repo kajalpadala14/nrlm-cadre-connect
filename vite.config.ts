@@ -17,6 +17,7 @@ export default defineConfig({
   // which Vercel picks up automatically — no manual vercel.json routing needed.
   nitro: {
     preset: "vercel",
+    // @ts-ignore noExternals is supported by Nitro but not in the lovable types
     noExternals: ["tslib"],
-  },
+  } as any,
 });

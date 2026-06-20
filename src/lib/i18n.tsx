@@ -54,6 +54,8 @@ const dict = {
   approvals: { en: "Approvals", hi: "स्वीकृतियां" },
   help_support: { en: "Help & Support", hi: "सहायता और समर्थन" },
   reports: { en: "Reports", hi: "रिपोर्ट" },
+  leave_requests: { en: "Leave Requests", hi: "अवकाश अनुरोध" },
+  leave_management: { en: "Leave Management", hi: "अवकाश प्रबंधन" },
 
   // Cadre quick actions
   submit_today: { en: "Submit Today's Work", hi: "आज का कार्य भेजें" },
@@ -166,6 +168,12 @@ const dict = {
   "status.rejected":   { en: "Rejected",   hi: "अस्वीकृत" },
   "status.not_marked": { en: "Not Marked", hi: "चिह्नित नहीं" },
   "status.pending_verification": { en: "Pending Verification", hi: "सत्यापन लंबित" },
+  "status.cancelled": { en: "Cancelled", hi: "रद्द किया गया" },
+  "lt.Casual": { en: "Casual Leave", hi: "आकस्मिक अवकाश" },
+  "lt.Sick": { en: "Sick Leave", hi: "चिकित्सा अवकाश" },
+  "lt.Official": { en: "Official Duty", hi: "आधिकारिक कार्य" },
+  "lt.Training": { en: "Training", hi: "प्रशिक्षण" },
+  "lt.Emergency": { en: "Emergency Leave", hi: "आपातकालीन अवकाश" },
   all_statuses: { en: "All Statuses", hi: "सभी स्थितियां" },
   change_status: { en: "Change Status", hi: "स्थिति बदलें" },
   workflow_status: { en: "Workflow Status", hi: "कार्यप्रवाह स्थिति" },

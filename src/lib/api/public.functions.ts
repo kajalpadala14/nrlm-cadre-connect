@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { calculateAttendanceRate } from "@/lib/utils/attendance";
 
 function last30Days(): string[] {
   const days: string[] = [];
@@ -38,8 +39,6 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
     allActivitiesResult,
     recentActivitiesResult,
     attendanceResult,
-    totalAttResult,
-    presentAttResult,
   ] = await Promise.all([
     supabaseAdmin.from("user_roles").select("user_id").eq("role", "cadre"),
     supabaseAdmin.from("blocks").select("id, name").order("name"),
@@ -49,11 +48,6 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
       .select("id, block_id, village_name, activity_date, status")
       .gte("activity_date", sinceStr),
     supabaseAdmin.from("attendance").select("id, cadre_id, date, status").gte("date", sinceStr),
-    supabaseAdmin.from("attendance").select("id", { count: "exact", head: true }),
-    supabaseAdmin
-      .from("attendance")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "present"),
   ]);
 
   assertNoError(cadreRolesResult.error, "Cadre role count failed");
@@ -61,8 +55,6 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   assertNoError(allActivitiesResult.error, "Activity query failed");
   assertNoError(recentActivitiesResult.error, "Recent activity query failed");
   assertNoError(attendanceResult.error, "Attendance query failed");
-  assertNoError(totalAttResult.error, "Attendance total count failed");
-  assertNoError(presentAttResult.error, "Present attendance count failed");
 
   const cadreIds = (cadreRolesResult.data ?? []).map((r) => r.user_id);
   const profilesResult =
@@ -80,36 +72,69 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   const totalActivities = activities.length;
   const villagesCovered = new Set(activities.map((a) => a.village_name).filter(Boolean)).size;
   const approvedActivities = activities.filter((a) => a.status === "Approved").length;
-  const attendanceRate =
-    totalAttResult.count && totalAttResult.count > 0
-      ? Math.round(((presentAttResult.count ?? 0) / totalAttResult.count) * 100)
-      : 0;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayAttendance = attendance.filter(a => a.date === todayStr);
+  const presentCount = todayAttendance.filter(a => a.status === "present").length;
+  const leaveCount = todayAttendance.filter(a => a.status === "on_leave").length;
+  const absentCount = todayAttendance.filter(a => a.status === "absent").length;
+  
+  const attendanceRate = calculateAttendanceRate(presentCount, leaveCount, activeCadres);
+
+  // Debug output as requested
+  console.log("=== PUBLIC PAGE ATTENDANCE DEBUG ===");
+  console.log(`Total Active Cadres: ${activeCadres}`);
+  console.log(`Present Count: ${presentCount}`);
+  console.log(`Leave Count: ${leaveCount}`);
+  console.log(`Absent Count: ${absentCount}`);
+  console.log(`Calculated Percentage: ${attendanceRate}%`);
+  console.log("====================================");
 
   const blockData = (blocksResult.data ?? []).map((b) => {
     const acts = activities.filter((a) => a.block_id === b.id);
-    const cadresInBlock = profiles.filter((p) => p.block_id === b.id).length;
+    const blockProfiles = profiles.filter((p) => p.block_id === b.id);
+    const activeCadresInBlock = blockProfiles.filter((p) => (p.status ?? "Active") === "Active").length;
+    const blockCadreIds = blockProfiles.map((p) => p.id);
+
+    // Today's attendance for this block
+    const blockTodayAtt = attendance.filter((a) => blockCadreIds.includes(a.cadre_id) && a.date === todayStr);
+    const blockPresent = blockTodayAtt.filter((a) => a.status === "present").length;
+    const blockLeave = blockTodayAtt.filter((a) => a.status === "on_leave").length;
+    const blockAttRate = calculateAttendanceRate(blockPresent, blockLeave, activeCadresInBlock);
+
+    // Clean block name — strip Hindi in parentheses e.g. "Geedam (गीदम)" → "Geedam"
+    const cleanName = b.name.replace(/\s*\(.*?\)\s*/g, "").trim();
+    const shortName = cleanName.length > 12 ? `${cleanName.slice(0, 12)}…` : cleanName;
+
     return {
-      name: b.name.length > 10 ? `${b.name.slice(0, 10)}...` : b.name,
-      fullName: b.name,
-      cadres: cadresInBlock,
+      name: shortName,
+      fullName: cleanName,
+      cadres: activeCadresInBlock,
       activities: acts.length,
       approved: acts.filter((a) => a.status === "Approved").length,
       pending: acts.filter((a) => a.status === "Pending").length,
+      villages: new Set(acts.map((a) => a.village_name).filter(Boolean)).size,
+      present: blockPresent,
+      on_leave: blockLeave,
+      attendanceRate: blockAttRate,
     };
   });
 
-  const activityTrendData = Array.from({ length: 6 }, (_, i) => {
-    const start = days[i * 5];
-    const end = days[Math.min(i * 5 + 4, 29)];
-    const label = new Date(start).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-    });
-    const slice = recentActivities.filter((a) => a.activity_date >= start && a.activity_date <= end);
+  // Activity Trend: one data point per day for the last 30 days.
+  // Label is shown every 5th day to avoid X-axis crowding.
+  // This replaces the broken 5-day-bucket approach which was collapsing all
+  // recent activities into the last bucket, making the chart appear flat.
+  const activityTrendData = days.map((day, i) => {
+    const dayActs = recentActivities.filter((a) => a.activity_date === day);
+    // Show label every 5th day (day 0, 5, 10, 15, 20, 25, 29)
+    const showLabel = i === 0 || i % 5 === 0 || i === days.length - 1;
+    const label = showLabel
+      ? new Date(day).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+      : "";
     return {
       label,
-      total: slice.length,
-      approved: slice.filter((a) => a.status === "Approved").length,
+      day,
+      total: dayActs.length,
+      approved: dayActs.filter((a) => a.status === "Approved").length,
     };
   });
 

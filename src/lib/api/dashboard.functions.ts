@@ -14,6 +14,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
+import { calculateAttendanceRate } from "@/lib/utils/attendance";
 
 // ─── GET DASHBOARD STATS ─────────────────────────────────────
 /**
@@ -46,7 +47,16 @@ export const getDashboardStats = createServerFn({ method: "POST" })
     });
 
     if (error) throw new Error(`Dashboard stats error: ${error.message}`);
-    return stats as {
+    
+    // Override the raw Postgres attendance percentage with our unified TS logic
+    const typedStats = stats as any;
+    typedStats.attendance_pct = calculateAttendanceRate(
+      typedStats.present_today ?? 0, 
+      typedStats.on_leave_today ?? 0, 
+      typedStats.total_cadres ?? 0
+    );
+    
+    return typedStats as {
       total_cadres: number;
       present_today: number;
       absent_today: number;
@@ -88,7 +98,14 @@ export const getBlockSummary = createServerFn({ method: "POST" })
 
     if (error) throw new Error(`Block summary error: ${error.message}`);
 
-    const rows = (summary ?? []) as Array<{
+    const rows = (summary ?? []).map((row: any) => ({
+      ...row,
+      attendance_pct: calculateAttendanceRate(
+        row.present ?? 0,
+        row.on_leave ?? 0,
+        row.total_cadres ?? 0
+      )
+    })) as Array<{
       block_id: string;
       block_name: string;
       total_cadres: number;

@@ -305,48 +305,54 @@ export type Database = {
       // ── leave_requests ──────────────────────────────────────
       leave_requests: {
         Row: {
-          block_id: string | null
-          cadre_id: string
-          created_at: string
-          end_date: string
           id: string
-          leave_type: Database["public"]["Enums"]["leave_type"]
-          reason: string | null
-          reviewed_at: string | null
-          reviewer_id: string | null
-          reviewer_remarks: string | null
-          start_date: string
-          status: Database["public"]["Enums"]["approval_status"]
+          cadre_id: string
+          block_id: string | null
+          leave_type: string
+          from_date: string
+          to_date: string
+          total_days: number
+          reason: string
+          attachment_url: string | null
+          status: string
+          approved_by: string | null
+          approved_at: string | null
+          approval_remarks: string | null
+          created_at: string
           updated_at: string
         }
         Insert: {
-          block_id?: string | null
-          cadre_id: string
-          created_at?: string
-          end_date: string
           id?: string
-          leave_type: Database["public"]["Enums"]["leave_type"]
-          reason?: string | null
-          reviewed_at?: string | null
-          reviewer_id?: string | null
-          reviewer_remarks?: string | null
-          start_date: string
-          status?: Database["public"]["Enums"]["approval_status"]
+          cadre_id: string
+          block_id?: string | null
+          leave_type: string
+          from_date: string
+          to_date: string
+          total_days: number
+          reason: string
+          attachment_url?: string | null
+          status?: string
+          approved_by?: string | null
+          approved_at?: string | null
+          approval_remarks?: string | null
+          created_at?: string
           updated_at?: string
         }
         Update: {
-          block_id?: string | null
-          cadre_id?: string
-          created_at?: string
-          end_date?: string
           id?: string
-          leave_type?: Database["public"]["Enums"]["leave_type"]
-          reason?: string | null
-          reviewed_at?: string | null
-          reviewer_id?: string | null
-          reviewer_remarks?: string | null
-          start_date?: string
-          status?: Database["public"]["Enums"]["approval_status"]
+          cadre_id?: string
+          block_id?: string | null
+          leave_type?: string
+          from_date?: string
+          to_date?: string
+          total_days?: number
+          reason?: string
+          attachment_url?: string | null
+          status?: string
+          approved_by?: string | null
+          approved_at?: string | null
+          approval_remarks?: string | null
+          created_at?: string
           updated_at?: string
         }
         Relationships: [
@@ -357,6 +363,20 @@ export type Database = {
             referencedRelation: "blocks"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "leave_requests_cadre_id_fkey"
+            columns: ["cadre_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
         ]
       }
       // ── notifications ───────────────────────────────────────

@@ -243,6 +243,16 @@ function Overview() {
       }
       const { data: dbRecent } = await recentQ;
 
+      // 8. Pending Leave Requests count
+      let leavePendingQ = supabase
+        .from("leave_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      if (blockId !== "all" && blockId) {
+        leavePendingQ = leavePendingQ.eq("block_id", blockId);
+      }
+      const { count: pendingLeaveCount } = await leavePendingQ;
+
 
       const recentCadreIds = Array.from(new Set((dbRecent ?? []).map((a) => a.cadre_id)));
       const recentProfilesMap = new Map();
@@ -348,6 +358,7 @@ function Overview() {
         blocksList,
         totalBlocks: blocksData?.length ?? 0,
         formattedRecent,
+        pendingLeaveCount: pendingLeaveCount ?? 0,
       };
     },
   });
@@ -716,15 +727,24 @@ function Overview() {
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
                 <Hourglass className="h-6 w-6" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-                  स्वीकृति लंबित / Action Required
+                  स्वीकृति लंबित / Pending Approvals
                 </p>
-                <h3 className="text-xl font-black text-slate-800 mt-1">{stats.pendingApprovals}</h3>
+                <div className="flex items-baseline gap-3.5 mt-1 flex-wrap">
+                  <Link to="/dashboard/approvals" className="hover:underline flex items-baseline">
+                    <span className="text-xl font-black text-slate-800 leading-none">{stats.pendingApprovals}</span>
+                    <span className="text-[9px] text-slate-400 font-bold uppercase ml-1">Acts</span>
+                  </Link>
+                  <Link to="/dashboard/leave" className="hover:underline flex items-baseline border-l border-slate-100 pl-3">
+                    <span className="text-xl font-black text-slate-800 leading-none">{dbStats?.pendingLeaveCount ?? 0}</span>
+                    <span className="text-[9px] text-slate-400 font-bold uppercase ml-1">Leaves</span>
+                  </Link>
+                </div>
               </div>
             </div>
-            {stats.pendingApprovals > 0 && (
-              <span className="rounded-full bg-rose-500 px-2.5 py-0.5 text-[10px] font-bold text-white animate-pulse">
+            {(stats.pendingApprovals > 0 || (dbStats?.pendingLeaveCount ?? 0) > 0) && (
+              <span className="rounded-full bg-rose-500 px-2.5 py-0.5 text-[10px] font-bold text-white animate-pulse shrink-0">
                 Action
               </span>
             )}
