@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicDashboardData } from "@/lib/api/public.functions";
-import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import {
   BarChart,
   Bar,
@@ -32,6 +31,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const CURRENT_YEAR = 2026;
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -86,8 +87,6 @@ function StatCard({
 
 // ── main component ─────────────────────────────────────────────────────────
 function PublicIndex() {
-  useActivityCacheSync();
-
   // No session check needed — public page is always shown as-is.
   // The Login to Dashboard button always goes to /auth.
   // After login, /auth redirects to /home automatically.
