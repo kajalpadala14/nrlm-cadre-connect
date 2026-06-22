@@ -390,7 +390,7 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
       let q = supabase
         .from("attendance")
         .select(`
-          date, status, check_in_at, check_out_at, remarks, block_id, cadre_id,
+          date, status, check_in_at, check_out_at, photo_uploaded_at, remarks, block_id, cadre_id,
           profiles!attendance_cadre_id_fkey(full_name, user_id, cadre_type, village,
             blocks!profiles_block_id_fkey(name))
         `)
@@ -409,10 +409,12 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
   });
 
   const STATUS_MAP: Record<string, string> = {
-    present: "Present",
-    absent: "Absent",
-    on_leave: "On Leave",
-    holiday: "Holiday",
+    present:              "Present",
+    late:                 "Late",
+    absent:               "Absent",
+    on_leave:             "On Leave",
+    holiday:              "Holiday",
+    pending:              "Pending",
     pending_verification: "Pending Verification",
   };
 
@@ -428,13 +430,23 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
     });
   }, [raw, statusFilter, roleFilter, search]);
 
-  const tableHeaders = ["Date", "Cadre Name", "User ID", "Role / Cadre Type", "Block", "Village", "Status", "Check-In", "Check-Out", "Remarks"];
+  const tableHeaders = ["Date", "Cadre Name", "User ID", "Role / Cadre Type", "Block", "Village", "Status", "Check-In", "Check-Out", "Photo Upload Time", "Remarks"];
   const tableRows = rows.slice(0, 200).map((r: any) => {
     const p = r.profiles ?? {};
     const checkIn = r.check_in_at ? new Date(r.check_in_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
     const checkOut = r.check_out_at ? new Date(r.check_out_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
-    return [r.date, p.full_name ?? "—", p.user_id ?? "—", ROLE_LABEL_MAP[p.cadre_type] ?? p.cadre_type ?? "—", p.blocks?.name ?? "—", p.village ?? "—", STATUS_MAP[r.status] ?? r.status, checkIn, checkOut, r.remarks ?? "—"];
+    const photoUpload = r.photo_uploaded_at ? new Date(r.photo_uploaded_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
+    return [r.date, p.full_name ?? "—", p.user_id ?? "—", ROLE_LABEL_MAP[p.cadre_type] ?? p.cadre_type ?? "—", p.blocks?.name ?? "—", p.village ?? "—", STATUS_MAP[r.status] ?? r.status, checkIn, checkOut, photoUpload, r.remarks ?? "—"];
   });
+
+  // Summary counts for the footer
+  const presentTotal = rows.filter((r: any) => r.status === "present").length;
+  const lateTotal    = rows.filter((r: any) => r.status === "late").length;
+  const absentTotal  = rows.filter((r: any) => r.status === "absent").length;
+  const pendingTotal = rows.filter((r: any) => r.status === "pending" || r.status === "pending_verification").length;
+  const summaryFooter = rows.length > 0
+    ? `Summary: Present ${presentTotal} | Late ${lateTotal} | Absent ${absentTotal} | Pending ${pendingTotal}`
+    : undefined;
 
   function buildExportRows() {
     return rows.map((r: any) => {
@@ -449,6 +461,7 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
         Status: STATUS_MAP[r.status] ?? r.status,
         "Check-In": r.check_in_at ? new Date(r.check_in_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
         "Check-Out": r.check_out_at ? new Date(r.check_out_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
+        "Photo Upload Time": r.photo_uploaded_at ? new Date(r.photo_uploaded_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
         Remarks: r.remarks ?? "",
       };
     });
@@ -472,7 +485,9 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="present">Present</SelectItem>
+                <SelectItem value="late">Late</SelectItem>
                 <SelectItem value="absent">Absent</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="on_leave">On Leave</SelectItem>
                 <SelectItem value="holiday">Holiday</SelectItem>
               </SelectContent>
@@ -506,7 +521,7 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
       <ReportTable
         headers={tableHeaders}
         rows={tableRows}
-        footer={rows.length > 200 ? `Showing 200 of ${rows.length}. Use Export for full data.` : undefined}
+        footer={rows.length > 200 ? `Showing 200 of ${rows.length}. Use Export for full data.` : summaryFooter}
       />
     </ReportPanel>
   );
@@ -704,10 +719,11 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
         const att = attData.filter((a: any) => a.cadre_id === p.id);
         const acts = actData.filter((a: any) => a.cadre_id === p.id);
         const present = att.filter((a: any) => a.status === "present").length;
-        const absent = att.filter((a: any) => a.status === "absent").length;
-        const leave = att.filter((a: any) => a.status === "on_leave").length;
-        const total = present + absent + leave;
-        const attPct = total > 0 ? ((present / total) * 100).toFixed(1) + "%" : "—";
+        const late    = att.filter((a: any) => a.status === "late").length;
+        const absent  = att.filter((a: any) => a.status === "absent").length;
+        const leave   = att.filter((a: any) => a.status === "on_leave").length;
+        const total   = present + late + absent + leave;
+        const attPct  = total > 0 ? (((present + late) / total) * 100).toFixed(1) + "%" : "—";
         const totalActs = acts.length;
         const approved = acts.filter((a: any) => a.status === "Approved").length;
         const pending = acts.filter((a: any) => a.status === "Pending").length;
@@ -724,11 +740,11 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
       });
   }, [profiles, attData, actData, roleFilter]);
 
-  const tableHeaders = ["User ID", "Cadre Name", "Role / Type", "Block", "Present", "Absent", "Leave", "Att%", "Activities", "Approved", "Pending", "Rejected", "Appr%", "Villages", "Beneficiaries"];
+  const tableHeaders = ["User ID", "Cadre Name", "Role / Type", "Block", "Present", "Late", "Absent", "Leave", "Att%", "Activities", "Approved", "Pending", "Rejected", "Appr%", "Villages", "Beneficiaries"];
   const tableRows = rows.slice(0, 200).map((r) => [
     r.profile.user_id, r.profile.full_name, ROLE_LABEL_MAP[(r.profile as any).cadre_type] ?? (r.profile as any).cadre_type ?? "—",
     (r.profile.blocks as any)?.name ?? "—",
-    r.present, r.absent, r.leave, r.attPct,
+    r.present, (r as any).late ?? 0, r.absent, r.leave, r.attPct,
     r.totalActs, r.approved, r.pending, r.rejected, r.approvalRate,
     r.villages, r.beneficiaries,
   ]);
@@ -741,6 +757,7 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
       Block: (r.profile.blocks as any)?.name ?? "",
       Village: r.profile.village ?? "",
       "Present Days": r.present,
+      "Late Days": (r as any).late ?? 0,
       "Absent Days": r.absent,
       "Leave Days": r.leave,
       "Attendance %": r.attPct,
@@ -854,9 +871,10 @@ function BlockPerformanceReport({ from, to, blockId }: { from: string; to: strin
       const bAct = actData.filter((a: any) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id);
 
       const present = bAtt.filter((a: any) => a.status === "present").length;
-      const absent = bAtt.filter((a: any) => a.status === "absent").length;
-      const total = present + absent;
-      const avgAttPct = total > 0 ? ((present / total) * 100).toFixed(1) + "%" : "—";
+      const late    = bAtt.filter((a: any) => a.status === "late").length;
+      const absent  = bAtt.filter((a: any) => a.status === "absent").length;
+      const total   = present + late + absent;
+      const avgAttPct = total > 0 ? (((present + late) / total) * 100).toFixed(1) + "%" : "—";
 
       const totalActs = bAct.length;
       const approved = bAct.filter((a: any) => a.status === "Approved").length;
@@ -866,18 +884,19 @@ function BlockPerformanceReport({ from, to, blockId }: { from: string; to: strin
       const villages = new Set(bAct.map((a: any) => a.village_name)).size;
       const beneficiaries = bAct.reduce((s: number, a: any) => s + (a.beneficiaries ?? 0), 0);
 
-      return { name: b.name, totalCadres, present, absent, avgAttPct, totalActs, approved, pending, rejected, approvalRate, villages, beneficiaries };
+      return { name: b.name, totalCadres, present, late, absent, avgAttPct, totalActs, approved, pending, rejected, approvalRate, villages, beneficiaries };
     });
   }, [blocks, attData, actData, profilesData]);
 
-  const tableHeaders = ["Block", "Total Cadres", "Present Days", "Absent Days", "Avg Att%", "Activities", "Approved", "Pending", "Rejected", "Appr%", "Villages", "Beneficiaries"];
-  const tableRows = rows.map((r) => [r.name, r.totalCadres, r.present, r.absent, r.avgAttPct, r.totalActs, r.approved, r.pending, r.rejected, r.approvalRate, r.villages, r.beneficiaries]);
+  const tableHeaders = ["Block", "Total Cadres", "Present Days", "Late Days", "Absent Days", "Avg Att%", "Activities", "Approved", "Pending", "Rejected", "Appr%", "Villages", "Beneficiaries"];
+  const tableRows = rows.map((r) => [r.name, r.totalCadres, r.present, (r as any).late ?? 0, r.absent, r.avgAttPct, r.totalActs, r.approved, r.pending, r.rejected, r.approvalRate, r.villages, r.beneficiaries]);
 
   function buildExportRows() {
     return rows.map((r) => ({
       "Block": r.name,
       "Total Cadres": r.totalCadres,
       "Total Present Days": r.present,
+      "Total Late Days": (r as any).late ?? 0,
       "Total Absent Days": r.absent,
       "Avg Attendance %": r.avgAttPct,
       "Total Activities": r.totalActs,

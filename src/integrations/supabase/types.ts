@@ -155,6 +155,7 @@ export type Database = {
           id: string
           latitude: number | null
           longitude: number | null
+          photo_uploaded_at: string | null
           recorded_by: string | null
           rejection_reason: string | null
           remarks: string | null
@@ -172,6 +173,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
+          photo_uploaded_at?: string | null
           recorded_by?: string | null
           rejection_reason?: string | null
           remarks?: string | null
@@ -189,6 +191,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
+          photo_uploaded_at?: string | null
           recorded_by?: string | null
           rejection_reason?: string | null
           remarks?: string | null
@@ -606,10 +609,12 @@ export type Database = {
       approval_status: "pending" | "approved" | "rejected" | "revision_requested"
       attendance_status:
         | "present"
+        | "late"
         | "absent"
         | "on_leave"
         | "holiday"
         | "pending_verification"
+        | "pending"
       cadre_type: "PRP" | "FLCRP" | "RBK" | "IFC_Anchor" | "SR_CRP"
       leave_type: "casual" | "sick" | "earned" | "emergency" | "other"
     }
@@ -750,10 +755,12 @@ export const Constants = {
       approval_status: ["pending", "approved", "rejected", "revision_requested"],
       attendance_status: [
         "present",
+        "late",
         "absent",
         "on_leave",
         "holiday",
         "pending_verification",
+        "pending",
       ],
       cadre_type: ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP"],
       leave_type: ["casual", "sick", "earned", "emergency", "other"],

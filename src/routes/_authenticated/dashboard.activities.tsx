@@ -562,7 +562,22 @@ function ActivitiesPage() {
     });
   }, [activities, effectiveBlockId, filterCadreName, filterActType, filterVillage, filterDate]);
 
-  // Build last-7-days chart data dynamically from the same filtered dataset
+  // Rolling 30-day date cutoff in IST (UTC+5:30)
+  // Computes once per render; stable because it only depends on wall-clock date not time.
+  const last30DaysCutoff = useMemo(() => {
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+    const cutoff = new Date(nowIST);
+    cutoff.setDate(nowIST.getDate() - 29); // today + 29 prior days = 30 days total
+    return cutoff.toISOString().slice(0, 10); // 'YYYY-MM-DD' in IST
+  }, []);
+
+  // Count of activities in the last 30 days (rolling), derived from the already-fetched dataset.
+  // Uses activity_date for comparison so it stays consistent with DB-level filtering.
+  const last30DaysCount = useMemo(
+    () => filteredActivities.filter((a) => a.date >= last30DaysCutoff).length,
+    [filteredActivities, last30DaysCutoff],
+  );
   const chartData = useMemo(() => {
     const today = new Date();
     const days: { name: string; isoDate: string }[] = [];
@@ -684,15 +699,15 @@ function ActivitiesPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">
-                    आज कुल गतिविधियाँ
+                    पिछले 30 दिनों की गतिविधियाँ
                   </p>
                   <p className="text-[9px] text-slate-400 font-semibold uppercase -mt-0.5 truncate">
-                    Total Today
+                    Last 30 Days
                   </p>
                 </div>
               </div>
               <h3 className="text-2xl font-black text-slate-800 mt-2.5">
-                {filteredActivities.length}
+                {last30DaysCount}
               </h3>
             </div>
 

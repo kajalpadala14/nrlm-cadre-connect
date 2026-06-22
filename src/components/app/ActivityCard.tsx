@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { invalidateActivityQueries } from "@/hooks/use-activity-cache-sync";
 import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
+import { getAttendanceBadgeClasses, getAttendanceStatusLabel } from "@/lib/utils/attendance";
 
 export interface ActivityCardData {
   id: string;
@@ -141,7 +142,7 @@ export function ActivityCard({
       });
       if (attError) throw attError;
 
-      toast.success("फोटो साक्ष्य अपलोड किया गया और उपस्थिति 'उपस्थित' मार्क की गई / Photo uploaded and attendance marked Present!");
+      toast.success("फोटो साक्ष्य अपलोड किया गया और उपस्थिति अपडेट की गई / Photo uploaded and attendance updated!");
       refetchAttendance();
       if (onRefetchHistory) onRefetchHistory();
       invalidateActivityQueries(qc);
@@ -307,7 +308,7 @@ export function ActivityCard({
           <div class="row"><div class="label">GPS Coordinates</div><div class="value">${activity.gps || "N/A"}</div></div>
           <div class="row"><div class="label">Submitted Date & Time</div><div class="value">${new Date(activity.submitted_at).toLocaleString()}</div></div>
           <div class="row"><div class="label">Approval Status</div><div class="value">${activity.status || "Pending"}</div></div>
-          <div class="row"><div class="label">Attendance Status</div><div class="value">${attendanceRecord?.status || "Not Marked"}</div></div>
+          <div class="row"><div class="label">Attendance Status</div><div class="value">${getAttendanceStatusLabel(attendanceRecord?.status)}</div></div>
           ${activity.approved_at ? `<div class="row"><div class="label">Approved Date</div><div class="value">${new Date(activity.approved_at).toLocaleString()}</div></div>` : ""}
           ${activity.approved_by_name ? `<div class="row"><div class="label">Approved By</div><div class="value">${activity.approved_by_name}</div></div>` : ""}
           <div class="description-box">
@@ -379,14 +380,10 @@ export function ActivityCard({
             <span
               className={cn(
                 "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider",
-                attendanceRecord.status === "present" && "bg-emerald-100 text-emerald-800",
-                attendanceRecord.status === "pending_verification" && "bg-amber-100 text-amber-800",
-                attendanceRecord.status === "absent" && "bg-rose-100 text-rose-800",
-                attendanceRecord.status === "on_leave" && "bg-blue-100 text-blue-800",
-                attendanceRecord.status === "holiday" && "bg-slate-100 text-slate-800"
+                getAttendanceBadgeClasses(attendanceRecord.status)
               )}
             >
-              उपस्थिति / Attendance: {attendanceRecord.status === "present" ? "Present" : attendanceRecord.status === "pending_verification" ? "Pending Verification" : attendanceRecord.status}
+              उपस्थिति / Attendance: {getAttendanceStatusLabel(attendanceRecord.status)}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 text-slate-500 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider">
@@ -667,12 +664,10 @@ export function ActivityCard({
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider",
-                      attendanceRecord.status === "present" && "bg-emerald-100 text-emerald-800",
-                      attendanceRecord.status === "pending_verification" && "bg-amber-100 text-amber-800",
-                      attendanceRecord.status === "absent" && "bg-rose-100 text-rose-800"
+                      getAttendanceBadgeClasses(attendanceRecord.status)
                     )}
                   >
-                    {attendanceRecord.status === "present" ? "Present" : attendanceRecord.status === "pending_verification" ? "Pending Verification" : attendanceRecord.status}
+                    {getAttendanceStatusLabel(attendanceRecord.status)}
                   </span>
                 ) : (
                   <span className="text-slate-400">Not Marked</span>

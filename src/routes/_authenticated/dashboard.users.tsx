@@ -277,7 +277,11 @@ function UsersPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Strict re-entrancy guard: ref is set synchronously before any await,
+    // so even if React hasn't re-rendered yet (button still enabled), all
+    // subsequent calls from rapid clicks are dropped immediately.
     if (cadreSaveInFlightRef.current) return;
+
     if (!form.name.trim()) {
       toast.error(t("toast_name_required"));
       return;
@@ -301,8 +305,25 @@ function UsersPage() {
       return;
     }
 
+    // Derive user_id BEFORE setting the in-flight flag so that all rapid
+    // clicks that slip through before the re-render get the same value,
+    // which means they will all attempt the same email on the backend and
+    // only the first one succeeds.
+    const derivedUserId = editingCadre
+      ? null
+      : form.name
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .slice(0, 20) +
+        "_" +
+        Math.floor(100 + Math.random() * 900);
+
+    // Set BOTH the ref (synchronous, stops re-entrant calls instantly) and
+    // the state (triggers button disabled re-render).
     cadreSaveInFlightRef.current = true;
     setIsCadreSaving(true);
+
     try {
       if (editingCadre) {
         if (!editingCadre.id) {
@@ -342,18 +363,12 @@ function UsersPage() {
 
         toast.success(t("toast_details_updated"));
       } else {
-        // Add using server function
-        const derivedUserId =
-          form.name
-            .trim()
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, "") +
-          "_" +
-          Math.floor(100 + Math.random() * 900);
-
+        // Add using server function — pass the pre-derived user_id so all
+        // duplicate rapid-clicks attempt the exact same email address and
+        // the server-side idempotency guard deduplicates them.
         await createUser({
           data: {
-            user_id: derivedUserId,
+            user_id: derivedUserId!,
             pin: form.pin,
             full_name: form.name,
             phone: form.phone || null,
@@ -371,6 +386,7 @@ function UsersPage() {
         toast.success(t("toast_cadre_created"));
       }
       setOpen(false);
+      setForm(EMPTY_FORM);
       refetch();
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);
@@ -428,7 +444,9 @@ function UsersPage() {
 
   const handleStaffSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Strict re-entrancy guard — same pattern as handleSave
     if (staffSaveInFlightRef.current) return;
+
     if (!staffForm.name.trim()) {
       toast.error("Full name is required.");
       return;
@@ -446,6 +464,13 @@ function UsersPage() {
       toast.error("Block Officers must be assigned to a block.");
       return;
     }
+
+    // Derive user_id before locking so rapid clicks share the same value
+    const derivedStaffUserId = editingStaff
+      ? null
+      : staffForm.name.trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20) +
+        "_" +
+        Math.floor(100 + Math.random() * 900);
 
     staffSaveInFlightRef.current = true;
     setIsStaffSaving(true);
@@ -478,14 +503,9 @@ function UsersPage() {
         }
         toast.success("Staff details updated.");
       } else {
-        const derivedUserId =
-          staffForm.name.trim().toLowerCase().replace(/[^a-z0-9]/g, "") +
-          "_" +
-          Math.floor(100 + Math.random() * 900);
-
         await createUser({
           data: {
-            user_id: derivedUserId,
+            user_id: derivedStaffUserId!,
             pin: staffForm.pin,
             full_name: staffForm.name,
             phone: staffForm.phone || null,
@@ -499,6 +519,7 @@ function UsersPage() {
         );
       }
       setStaffOpen(false);
+      setStaffForm(EMPTY_STAFF_FORM);
       refetchStaff();
     } catch (err: any) {
       toast.error(`Error: ${err.message}`);

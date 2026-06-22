@@ -109,9 +109,49 @@ export const createUser = createServerFn({ method: "POST" })
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const systemRole = normalizeCreateUserRole(data.role);
+    const targetEmail = emailFor(data.user_id);
+
+    // ── Idempotency guard ───────────────────────────────────────────────
+    // If an auth user with this email already exists (from a duplicate rapid
+    // click or a retry), return its ID immediately without creating anything.
+    // This makes createUser safe to call multiple times with the same input.
+    const { data: existingList } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+    const existingAuthUser = existingList?.users.find((u) => u.email === targetEmail);
+    if (existingAuthUser) {
+      // Already exists — verify profile + role rows are in place then return
+      await supabaseAdmin
+        .from("profiles")
+        .upsert(
+          {
+            id: existingAuthUser.id,
+            user_id: data.user_id,
+            full_name: data.full_name,
+            phone: data.phone ?? null,
+            cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
+            block_id: data.block_id ?? null,
+            village: systemRole === "cadre" ? (data.village ?? null) : null,
+            panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
+            gender: systemRole === "cadre" ? (data.gender ?? null) : null,
+            join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
+            status: systemRole === "cadre" ? (data.status ?? null) : null,
+          },
+          { onConflict: "id" },
+        );
+      await supabaseAdmin
+        .from("user_roles")
+        .upsert(
+          { user_id: existingAuthUser.id, role: systemRole },
+          { onConflict: "user_id,role" },
+        );
+      return { id: existingAuthUser.id };
+    }
+    // ────────────────────────────────────────────────────────────────────
 
     const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-      email: emailFor(data.user_id),
+      email: targetEmail,
       password: passwordFor(data.pin),
       email_confirm: true,
       user_metadata: { user_id: data.user_id, full_name: data.full_name },

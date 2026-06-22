@@ -864,18 +864,18 @@ function SubmitPage() {
                   block_id: selectedDbBlockId,
                   date: actDate,
                   attendance_date: actDate,
-                  status: "pending_verification",
+                  status: "pending",
                   recorded_by: profile.id,
                 })
                 .select("id")
                 .single();
               if (insertAttError) throw insertAttError;
               finalAttendanceId = newAtt.id;
-            } else if (existingAtt.status !== "present" && existingAtt.status !== "pending_verification") {
+            } else if (existingAtt.status !== "present" && existingAtt.status !== "late" && existingAtt.status !== "pending") {
               const { error: updateAttError } = await supabase
                 .from("attendance")
                 .update({
-                  status: "pending_verification",
+                  status: "pending",
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", existingAtt.id);
@@ -896,7 +896,7 @@ function SubmitPage() {
               }
             }
 
-            toast.warning("उपस्थिति सत्यापन लंबित (कोई जियो-टैग नहीं) / Attendance pending verification (no geotag)");
+            toast.warning("उपस्थिति सत्यापन लंबित (कोई जियो-टैग नहीं) / Attendance pending (no geotag)");
           } else {
             toast.success("उपस्थिति स्वतः दर्ज की गई (उपस्थित) / Attendance auto-marked Present");
             console.log("Attendance insert completed");
@@ -974,17 +974,17 @@ function SubmitPage() {
                 block_id: draft.block_id,
                 date: draft.activity_date,
                 attendance_date: draft.activity_date,
-                status: "pending_verification",
+                status: "pending",
                 recorded_by: draft.cadre_id,
               })
               .select("id")
               .single();
             finalAttendanceId = newAtt?.id;
-          } else if (existingAtt.status !== "present" && existingAtt.status !== "pending_verification") {
+          } else if (existingAtt.status !== "present" && existingAtt.status !== "late" && existingAtt.status !== "pending") {
             await supabase
               .from("attendance")
               .update({
-                status: "pending_verification",
+                status: "pending",
                 updated_at: new Date().toISOString(),
               })
               .eq("id", existingAtt.id);

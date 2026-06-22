@@ -30,6 +30,7 @@ import { useProfile } from "@/hooks/use-auth";
 import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { getAttendanceStatusLabel } from "@/lib/utils/attendance";
 
 export const Route = createFileRoute("/_authenticated/dashboard/attendance")({
   component: AttendancePage,
@@ -122,30 +123,15 @@ function AttendancePage() {
     .map((cadre) => {
       const record = attendanceRecords.find((r) => r.cadre_id === cadre.id)!;
 
-      let uiStatus = "Absent";
+      let uiStatus = getAttendanceStatusLabel(record.status);
       let checkInStr = "—";
       let checkOutStr = "—";
 
-      if (record.status === "present") {
-        uiStatus = "Present";
-        if (record.check_in_at) {
-          const checkInDate = new Date(record.check_in_at);
-          checkInStr = format(checkInDate, "hh:mm a");
-          const hours = checkInDate.getHours();
-          const minutes = checkInDate.getMinutes();
-          if (hours > 9 || (hours === 9 && minutes >= 30)) {
-            uiStatus = "Late";
-          }
-        }
-        if (record.check_out_at) {
-          checkOutStr = format(new Date(record.check_out_at), "hh:mm a");
-        }
-      } else if (record.status === "absent") {
-        uiStatus = "Absent";
-      } else if (record.status === "on_leave") {
-        uiStatus = "Leave";
-      } else if (record.status === "holiday") {
-        uiStatus = "Holiday";
+      if (record.check_in_at) {
+        checkInStr = format(new Date(record.check_in_at), "hh:mm a");
+      }
+      if ((record.status === "present" || record.status === "late") && record.check_out_at) {
+        checkOutStr = format(new Date(record.check_out_at), "hh:mm a");
       }
 
       return {
@@ -175,7 +161,7 @@ function AttendancePage() {
 
     let check_in_at: string | null = null;
     let check_out_at: string | null = null;
-    let dbStatus: "present" | "absent" | "on_leave" | "holiday" = "absent";
+    let dbStatus: "present" | "late" | "absent" | "pending" | "pending_verification" | "on_leave" | "holiday" = "absent";
 
     const selectedDate = new Date(date);
 
@@ -186,15 +172,16 @@ function AttendancePage() {
       selectedDate.setHours(17, 0, 0, 0);
       check_out_at = selectedDate.toISOString();
     } else if (newStatus === "Late") {
-      dbStatus = "present";
-      selectedDate.setHours(9, 45, 0, 0);
+      dbStatus = "late";
+      selectedDate.setHours(18, 1, 0, 0);
       check_in_at = selectedDate.toISOString();
-      selectedDate.setHours(17, 0, 0, 0);
-      check_out_at = selectedDate.toISOString();
+      check_out_at = null;
     } else if (newStatus === "Leave") {
       dbStatus = "on_leave";
     } else if (newStatus === "Absent") {
       dbStatus = "absent";
+    } else if (newStatus === "Pending") {
+      dbStatus = "pending";
     }
 
     try {
@@ -380,8 +367,9 @@ function AttendancePage() {
                       "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-bold text-[10px] uppercase",
                       item.status === "Present" && "bg-emerald-50 text-emerald-700",
                       item.status === "Absent" && "bg-rose-50 text-rose-700",
-                      item.status === "Leave" && "bg-orange-50 text-orange-700",
-                      item.status === "Late" && "bg-amber-50 text-amber-700",
+                      item.status === "On Leave" && "bg-blue-50 text-blue-700",
+                      item.status === "Late" && "bg-orange-50 text-orange-700",
+                      item.status === "Pending" && "bg-yellow-50 text-yellow-700",
                     )}
                   >
                     {item.status}
@@ -437,9 +425,9 @@ function AttendancePage() {
                       onClick={() => handleStatusChange(item.id, "Leave")}
                       className={cn(
                         "h-7 text-[9px] font-bold rounded-md px-2 flex-1 min-w-[60px]",
-                        item.status === "Leave"
-                          ? "bg-orange-500 text-white"
-                          : "bg-white border border-slate-200 text-slate-600 hover:bg-orange-50",
+                        item.status === "On Leave"
+                          ? "bg-blue-500 text-white"
+                          : "bg-white border border-slate-200 text-slate-600 hover:bg-blue-50",
                       )}
                     >
                       Leave
@@ -450,11 +438,23 @@ function AttendancePage() {
                       className={cn(
                         "h-7 text-[9px] font-bold rounded-md px-2 flex-1 min-w-[60px]",
                         item.status === "Late"
-                          ? "bg-amber-500 text-white"
-                          : "bg-white border border-slate-200 text-slate-600 hover:bg-amber-50",
+                          ? "bg-orange-500 text-white"
+                          : "bg-white border border-slate-200 text-slate-600 hover:bg-orange-50",
                       )}
                     >
                       Late
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleStatusChange(item.id, "Pending")}
+                      className={cn(
+                        "h-7 text-[9px] font-bold rounded-md px-2 flex-1 min-w-[60px]",
+                        item.status === "Pending"
+                          ? "bg-yellow-500 text-white"
+                          : "bg-white border border-slate-200 text-slate-600 hover:bg-yellow-50",
+                      )}
+                    >
+                      Pending
                     </Button>
                   </div>
                 </div>
@@ -517,14 +517,16 @@ function AttendancePage() {
                           "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black uppercase",
                           item.status === "Present" && "bg-emerald-50 text-emerald-700",
                           item.status === "Absent" && "bg-rose-50 text-rose-700",
-                          item.status === "Leave" && "bg-orange-50 text-orange-700",
-                          item.status === "Late" && "bg-amber-50 text-amber-700",
+                          item.status === "On Leave" && "bg-blue-50 text-blue-700",
+                          item.status === "Late" && "bg-orange-50 text-orange-700",
+                          item.status === "Pending" && "bg-yellow-50 text-yellow-700",
                         )}
                       >
                         {item.status === "Present" && <CheckCircle className="h-3.5 w-3.5" />}
                         {item.status === "Absent" && <XCircle className="h-3.5 w-3.5" />}
-                        {item.status === "Leave" && <CalendarIcon className="h-3.5 w-3.5" />}
+                        {item.status === "On Leave" && <CalendarIcon className="h-3.5 w-3.5" />}
                         {item.status === "Late" && <Clock className="h-3.5 w-3.5" />}
+                        {item.status === "Pending" && <AlertCircle className="h-3.5 w-3.5" />}
                         {item.status}
                       </span>
                     </td>
@@ -559,9 +561,9 @@ function AttendancePage() {
                           onClick={() => handleStatusChange(item.id, "Leave")}
                           className={cn(
                             "h-7 text-[10px] font-bold rounded-md px-2",
-                            item.status === "Leave"
-                              ? "bg-orange-500 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-orange-50 hover:text-orange-700",
+                            item.status === "On Leave"
+                              ? "bg-blue-500 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700",
                           )}
                         >
                           Leave
@@ -572,11 +574,23 @@ function AttendancePage() {
                           className={cn(
                             "h-7 text-[10px] font-bold rounded-md px-2",
                             item.status === "Late"
-                              ? "bg-amber-500 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700",
+                              ? "bg-orange-500 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-orange-50 hover:text-orange-700",
                           )}
                         >
                           Late
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleStatusChange(item.id, "Pending")}
+                          className={cn(
+                            "h-7 text-[10px] font-bold rounded-md px-2",
+                            item.status === "Pending"
+                              ? "bg-yellow-500 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-yellow-50 hover:text-yellow-700",
+                          )}
+                        >
+                          Pending
                         </Button>
                       </div>
                     </td>

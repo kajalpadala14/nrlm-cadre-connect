@@ -77,7 +77,13 @@ function Overview() {
       const { data: attData } = await attendanceQ;
 
       const presentCount = attData?.filter((a) => a.status === "present").length ?? 0;
+      const lateCount = attData?.filter((a) => a.status === "late").length ?? 0;
       const absentCount = attData?.filter((a) => a.status === "absent").length ?? 0;
+      // pending = cadres who have activities today but no attendance record yet
+      // We compute this after fetching cadresWithActivitiesToday below.
+      const pendingAttendanceCount = attData?.filter(
+        (a) => a.status === "pending" || a.status === "pending_verification",
+      ).length ?? 0;
       const leaveCount = attData?.filter((a) => a.status === "on_leave").length ?? 0;
 
       // 3. Activities counts (overall / lifetime)
@@ -196,8 +202,8 @@ function Overview() {
           const cadresInBlock = profs?.filter((p) => p.block_id === b.id) ?? [];
           const total = cadresInBlock.length;
 
-          const presentAttInBlock =
-            atts?.filter((a) => (a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) && a.status === "present") ?? [];
+          const submittedAttInBlock =
+            atts?.filter((a) => (a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) && (a.status === "present" || a.status === "late")) ?? [];
           const active = cadresInBlock.filter((p) => (p.status ?? "Active") === "Active").length;
           const inactive = cadresInBlock.filter((p) => p.status === "Inactive").length;
 
@@ -208,7 +214,7 @@ function Overview() {
           const villages = uniqueVillages.size;
 
           const attendance =
-            total > 0 ? ((presentAttInBlock.length / total) * 100).toFixed(2) + "%" : "0.00%";
+            total > 0 ? ((submittedAttInBlock.length / total) * 100).toFixed(2) + "%" : "0.00%";
 
           return {
             name: b.name,
@@ -338,7 +344,9 @@ function Overview() {
       return {
         totalCadres,
         activeToday: presentCount,
+        lateToday: lateCount,
         inactiveToday: absentCount,
+        pendingAttendanceToday: pendingAttendanceCount,
         leaveCount: leaveCount,
         activitiesToday: actTodayRows?.length ?? 0,
         villagesToday: villagesToday.size,
@@ -366,7 +374,9 @@ function Overview() {
   const stats = {
     totalCadres: dbStats?.totalCadres ?? 0,
     activeToday: dbStats?.activeToday ?? 0,
+    lateToday: dbStats?.lateToday ?? 0,
     inactiveToday: dbStats?.inactiveToday ?? 0,
+    pendingAttendanceToday: dbStats?.pendingAttendanceToday ?? 0,
     leaveCount: dbStats?.leaveCount ?? 0,
     villagesCovered: dbStats?.villagesToday ?? 0,
     panchayatsCovered: dbStats?.panchayatsToday ?? 0,
@@ -377,13 +387,13 @@ function Overview() {
     activitiesSubmitted: dbStats?.activitiesToday ?? 0,
     attendancePercent:
       dbStats?.totalCadres && dbStats.totalCadres > 0
-        ? parseFloat(((dbStats.activeToday / dbStats.totalCadres) * 100).toFixed(2))
+        ? parseFloat((((dbStats.activeToday + dbStats.lateToday) / dbStats.totalCadres) * 100).toFixed(2))
         : 0,
   };
 
   // ── Attendance Detail Sheet ──────────────────────────────────────────────
-  // null = closed. "present" | "absent" | "on_leave" = which tab was clicked.
-  const [attSheetStatus, setAttSheetStatus] = useState<"present" | "absent" | "on_leave" | null>(null);
+  // null = closed. Business attendance statuses open a detail sheet.
+  const [attSheetStatus, setAttSheetStatus] = useState<"present" | "late" | "absent" | "pending_verification" | null>(null);
 
   // Lazy query — only fires when admin clicks a View button (enabled: !!attSheetStatus).
   // Fetches ONLY cadres that have an attendance record matching the chosen status on dateStr.
@@ -456,12 +466,14 @@ function Overview() {
 
   const sheetTitle =
     attSheetStatus === "present"
-      ? "Present Cadres / उपस्थित कैडर"
-      : attSheetStatus === "absent"
-        ? "Absent Cadres / अनुपस्थित कैडर"
-        : attSheetStatus === "on_leave"
-          ? "On Leave / अवकाश पर कैडर"
-          : "";
+      ? "Present Cadres / Present Attendance"
+      : attSheetStatus === "late"
+        ? "Late Cadres / Late Attendance"
+        : attSheetStatus === "absent"
+          ? "Absent Cadres / Absent Attendance"
+          : attSheetStatus === "pending_verification"
+            ? "Pending Cadres / Pending Attendance"
+            : "";
 
   const handleApprove = async (id: string, name: string) => {
     try {
@@ -516,8 +528,9 @@ function Overview() {
             <div className="flex items-center justify-between">
               <SheetTitle className="text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-2">
                 {attSheetStatus === "present" && <CheckCircle className="h-4 w-4 text-emerald-500" />}
+                {attSheetStatus === "late" && <Clock className="h-4 w-4 text-orange-500" />}
                 {attSheetStatus === "absent" && <XCircle className="h-4 w-4 text-rose-500" />}
-                {attSheetStatus === "on_leave" && <CalendarDays className="h-4 w-4 text-orange-500" />}
+                {attSheetStatus === "pending_verification" && <Hourglass className="h-4 w-4 text-yellow-500" />}
                 {sheetTitle}
               </SheetTitle>
               <span className="text-[10px] font-bold text-slate-400 uppercase">{dateStr}</span>
@@ -536,8 +549,9 @@ function Overview() {
             ) : attDetailRows.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-2">
                 {attSheetStatus === "present" && <CheckCircle className="h-8 w-8 text-slate-200" />}
+                {attSheetStatus === "late" && <Clock className="h-8 w-8 text-slate-200" />}
                 {attSheetStatus === "absent" && <XCircle className="h-8 w-8 text-slate-200" />}
-                {attSheetStatus === "on_leave" && <CalendarDays className="h-8 w-8 text-slate-200" />}
+                {attSheetStatus === "pending_verification" && <Hourglass className="h-8 w-8 text-slate-200" />}
                 <p className="text-xs font-bold">
                   {attSheetStatus === "present"
                     ? "कोई उपस्थित नहीं / No cadres present"
@@ -557,8 +571,9 @@ function Overview() {
                     <div className={cn(
                       "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-black",
                       row.status === "present" && "bg-emerald-100 text-emerald-700",
+                      row.status === "late" && "bg-orange-100 text-orange-700",
                       row.status === "absent" && "bg-rose-100 text-rose-700",
-                      row.status === "on_leave" && "bg-orange-100 text-orange-700",
+                      row.status === "pending_verification" && "bg-yellow-100 text-yellow-700",
                     )}>
                       {row.name.charAt(0).toUpperCase()}
                     </div>
@@ -578,13 +593,15 @@ function Overview() {
                     <span className={cn(
                       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase",
                       row.status === "present" && "bg-emerald-50 text-emerald-700",
+                      row.status === "late" && "bg-orange-50 text-orange-700",
                       row.status === "absent" && "bg-rose-50 text-rose-700",
-                      row.status === "on_leave" && "bg-orange-50 text-orange-700",
+                      row.status === "pending_verification" && "bg-yellow-50 text-yellow-700",
                     )}>
                       {row.status === "present" && <CheckCircle className="h-3 w-3" />}
+                      {row.status === "late" && <Clock className="h-3 w-3" />}
                       {row.status === "absent" && <XCircle className="h-3 w-3" />}
-                      {row.status === "on_leave" && <CalendarDays className="h-3 w-3" />}
-                      {row.status === "present" ? "Present" : row.status === "absent" ? "Absent" : "Leave"}
+                      {row.status === "pending_verification" && <Hourglass className="h-3 w-3" />}
+                      {row.status === "present" ? "Present" : row.status === "late" ? "Late" : row.status === "absent" ? "Absent" : "Pending"}
                     </span>
                     {row.checkIn !== "—" && (
                       <p className="text-[10px] font-mono font-semibold text-slate-400 mt-1 flex items-center justify-end gap-0.5">
@@ -647,6 +664,22 @@ function Overview() {
             </button>
 
             <button
+              onClick={() => { console.log("[KPI] Late View clicked, setting attSheetStatus=late"); setAttSheetStatus("late"); }}
+              className="w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-orange-50 transition-colors group"
+            >
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-orange-500" />
+                <span className="text-[11px] font-bold text-slate-600">Late</span>
+                <span className="text-[11px] font-black text-orange-700 bg-orange-50 rounded-full px-2 py-0.5">
+                  {stats.lateToday}
+                </span>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 group-hover:text-orange-600 flex items-center gap-0.5">
+                <Eye className="h-3 w-3" /> View
+              </span>
+            </button>
+
+            <button
               onClick={() => { console.log("[KPI] Absent View clicked, setting attSheetStatus=absent"); setAttSheetStatus("absent"); }}
               className="w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-rose-50 transition-colors group"
             >
@@ -663,17 +696,17 @@ function Overview() {
             </button>
 
             <button
-              onClick={() => { console.log("[KPI] Leave View clicked, setting attSheetStatus=on_leave"); setAttSheetStatus("on_leave"); }}
-              className="w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-orange-50 transition-colors group"
+              onClick={() => { console.log("[KPI] Pending View clicked, setting attSheetStatus=pending_verification"); setAttSheetStatus("pending_verification"); }}
+              className="w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-yellow-50 transition-colors group"
             >
               <div className="flex items-center gap-2">
-                <CalendarDays className="h-3.5 w-3.5 text-orange-500" />
-                <span className="text-[11px] font-bold text-slate-600">On Leave</span>
-                <span className="text-[11px] font-black text-orange-700 bg-orange-50 rounded-full px-2 py-0.5">
-                  {stats.leaveCount}
+                <Hourglass className="h-3.5 w-3.5 text-yellow-500" />
+                <span className="text-[11px] font-bold text-slate-600">Pending</span>
+                <span className="text-[11px] font-black text-yellow-700 bg-yellow-50 rounded-full px-2 py-0.5">
+                  {stats.pendingAttendanceToday}
                 </span>
               </div>
-              <span className="text-[10px] font-bold text-slate-400 group-hover:text-orange-600 flex items-center gap-0.5">
+              <span className="text-[10px] font-bold text-slate-400 group-hover:text-yellow-600 flex items-center gap-0.5">
                 <Eye className="h-3 w-3" /> View
               </span>
             </button>

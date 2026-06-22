@@ -53,7 +53,8 @@ export const getDashboardStats = createServerFn({ method: "POST" })
     typedStats.attendance_pct = calculateAttendanceRate(
       typedStats.present_today ?? 0, 
       typedStats.on_leave_today ?? 0, 
-      typedStats.total_cadres ?? 0
+      typedStats.total_cadres ?? 0,
+      typedStats.late_today ?? 0
     );
     
     return typedStats as {
@@ -103,7 +104,8 @@ export const getBlockSummary = createServerFn({ method: "POST" })
       attendance_pct: calculateAttendanceRate(
         row.present ?? 0,
         row.on_leave ?? 0,
-        row.total_cadres ?? 0
+        row.total_cadres ?? 0,
+        row.late ?? 0
       )
     })) as Array<{
       block_id: string;
@@ -232,6 +234,7 @@ export const getMyCadreSummary = createServerFn({ method: "POST" })
     return {
       month,
       present_days: att.filter((a) => a.status === "present").length,
+      late_days: att.filter((a) => a.status === "late").length,
       absent_days: att.filter((a) => a.status === "absent").length,
       leave_days: att.filter((a) => a.status === "on_leave").length,
       total_activities: act.length,
