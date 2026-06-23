@@ -25,6 +25,7 @@ import { useProfile } from "@/hooks/use-auth";
 import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { useT } from "@/lib/i18n";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
+import { getActivityLabel } from "@/constants/activityTypes";
 import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
 
 export const Route = createFileRoute("/_authenticated/dashboard/approvals")({
@@ -470,7 +471,7 @@ function ApprovalsPage() {
                       </p>
                       <p className="text-xs font-black text-slate-700 flex items-center gap-1.5">
                         <FileText className="h-4 w-4 text-slate-400" />
-                        {item.activity_type.replace(/_/g, " ")}
+                        {getActivityLabel(item.activity_type)}
                       </p>
                     </div>
 
@@ -624,7 +625,7 @@ function ApprovalsPage() {
                         <div className="space-y-1 text-slate-700">
                           <p className="font-extrabold flex items-center gap-1">
                             <FileText className="h-3.5 w-3.5 text-amber-600" />
-                            {item.activity_type.replace(/_/g, " ")} (गांव: {item.village})
+                            {getActivityLabel(item.activity_type)} (गांव: {item.village})
                           </p>
                           <p className="font-medium text-slate-500 leading-relaxed italic">
                             "{item.description}"

@@ -15,6 +15,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
+import { ACTIVITY_TYPES, normalizeActivityType } from "@/constants/activityTypes";
 
 // ─── Guard helper ─────────────────────────────────────────────
 
@@ -118,20 +119,12 @@ export const getActivityTypeReport = createServerFn({ method: "POST" })
     const grouped: Record<string, Record<string, number>> = {};
     for (const row of rows ?? []) {
       const blockName = (row.blocks as { name?: string } | null)?.name ?? "Unknown";
-      const actType = row.activity_type ?? "Other";
+      const actType = normalizeActivityType(row.activity_type);
       if (!grouped[blockName]) grouped[blockName] = {};
       grouped[blockName][actType] = (grouped[blockName][actType] ?? 0) + 1;
     }
 
-    const activityTypes = [
-      "SHG_Meeting",
-      "Farmer_Visit",
-      "Training_Session",
-      "Monitoring_Visit",
-      "Record_Verification",
-      "Livelihood_Activity",
-      "Other",
-    ];
+    const activityTypes = [...ACTIVITY_TYPES];
 
     const table = Object.entries(grouped).map(([block, counts]) => ({
       block_name: block,

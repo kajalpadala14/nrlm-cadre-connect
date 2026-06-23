@@ -426,7 +426,7 @@ function PublicIndex() {
                 { label: "Programme Focus", value: "Rural Livelihood & Women Empowerment" },
                 { label: "Blocks Covered / ब्लॉक", value: "4 Blocks (Dantewada, Geedam, Kuakonda, Katekalyan)" },
                 { label: "Cadre Types", value: "PRP · FLCRP · RBK · IFC Anchor · SR·CRP" },
-                { label: "Field Activities Tracked", value: "SHG Meeting · Farmer Visit · Training · Monitoring · Livelihood" },
+                { label: "Field Activities Tracked", value: "स्व सहायता समूह बैठक · प्रशिक्षण · IFC सर्वे · क्षेत्र भ्रमण" },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-start justify-between gap-4 border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
                   <span className="text-slate-400 shrink-0">{label}</span>

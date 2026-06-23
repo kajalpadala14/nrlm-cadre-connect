@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { invalidateActivityQueries } from "@/hooks/use-activity-cache-sync";
 import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
 import { getAttendanceBadgeClasses, getAttendanceStatusLabel } from "@/lib/utils/attendance";
+import { getActivityLabel } from "@/constants/activityTypes";
 
 export interface ActivityCardData {
   id: string;
@@ -302,7 +303,7 @@ export function ActivityCard({
           </div>
           <div class="row"><div class="label">Activity ID</div><div class="value">${activity.id}</div></div>
           <div class="row"><div class="label">Activity Date</div><div class="value">${activity.activity_date}</div></div>
-          <div class="row"><div class="label">Activity Type</div><div class="value">${activity.activity_type}</div></div>
+          <div class="row"><div class="label">Activity Type</div><div class="value">${getActivityLabel(activity.activity_type)}</div></div>
           <div class="row"><div class="label">Village / Block</div><div class="value">${activity.village_name} / ${activity.block_name || "N/A"}</div></div>
           <div class="row"><div class="label">Beneficiary Count</div><div class="value">${activity.beneficiaries || 0}</div></div>
           <div class="row"><div class="label">GPS Coordinates</div><div class="value">${activity.gps || "N/A"}</div></div>
@@ -359,7 +360,7 @@ export function ActivityCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="inline-flex items-center rounded-md bg-blue-50 px-2.5 py-0.5 text-xs font-bold text-[#0055A4]">
-            {t(`act.${activity.activity_type}`)}
+            {getActivityLabel(activity.activity_type)}
           </span>
           {/* Status Badge */}
           <span
@@ -642,7 +643,7 @@ export function ActivityCard({
               </div>
               <div className="space-y-2">
                 <p className="text-[10px] text-slate-400 uppercase">गतिविधि प्रकार / Activity Type</p>
-                <p className="text-[#0055A4] font-extrabold">{t(`act.${activity.activity_type}`)}</p>
+                <p className="text-[#0055A4] font-extrabold">{getActivityLabel(activity.activity_type)}</p>
               </div>
               <div className="space-y-2">
                 <p className="text-[10px] text-slate-400 uppercase">स्थान / Village & Panchayat</p>

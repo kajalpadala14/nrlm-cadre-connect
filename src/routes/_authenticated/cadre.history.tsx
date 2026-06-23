@@ -18,25 +18,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
+import { ACTIVITY_TYPES, normalizeActivityType } from "@/constants/activityTypes";
 
 export const Route = createFileRoute("/_authenticated/cadre/history")({
   component: HistoryPage,
 });
 
-const ACTIVITY_TYPES = [
-  "All",
-  "SHG Meeting",
-  "VO Meeting",
-  "Training",
-  "Farmer Visit",
-  "Livelihood Demo",
-  "Bank Linkage",
-  "Monitoring Visit",
-  "Record Verification",
-  "Community Mobilization",
-  "Enterprise Promotion",
-  "Other",
-];
+const ACTIVITY_FILTER_TYPES = ["All", ...ACTIVITY_TYPES] as const;
 
 function StatCard({ title, value, color }: { title: string; value: number | string; color: "blue" | "emerald" | "amber" | "rose" | "purple" | "teal" }) {
   const styles = {
@@ -106,12 +94,7 @@ function HistoryPage() {
 
       const matchesType =
         filterType === "All" ||
-        a.activity_type.toLowerCase() === filterType.toLowerCase() ||
-        (a.activity_type === "Training_Session" && filterType.toLowerCase() === "training") ||
-        (a.activity_type === "Livelihood_Activity" && filterType.toLowerCase() === "livelihood demo") ||
-        (a.activity_type === "Record_Verification" && filterType.toLowerCase() === "record verification") ||
-        (a.activity_type === "Farmer_Visit" && filterType.toLowerCase() === "farmer visit") ||
-        (a.activity_type === "Monitoring_Visit" && filterType.toLowerCase() === "monitoring visit");
+        normalizeActivityType(a.activity_type) === filterType;
 
       const matchesVillage =
         filterVillage === "All" || a.village_name === filterVillage;
@@ -289,7 +272,7 @@ function HistoryPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {ACTIVITY_TYPES.map((actType) => (
+              {ACTIVITY_FILTER_TYPES.map((actType) => (
                 <SelectItem key={actType} value={actType}>
                   {actType === "All" ? t("all_types_opt") : actType}
                 </SelectItem>

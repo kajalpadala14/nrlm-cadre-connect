@@ -37,6 +37,7 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 import { deleteEvidenceWithConsistency } from "@/lib/evidence-consistency";
+import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
 
 export const Route = createFileRoute("/_authenticated/dashboard/evidence")({
   component: EvidencePage,
@@ -140,11 +141,11 @@ function EvidencePage() {
           cadre_id: a.cadre_id,
           storage_path: evidence.storage_path,
           url: evidence.public_url || "",
-          caption: a.description || a.activity_type.replace(/_/g, " "),
+          caption: a.description || getActivityLabel(a.activity_type),
           cadre_name: (a.profiles as any)?.full_name || "Unknown Cadre",
           role: (a.profiles as any)?.cadre_type || "PRP",
           date: a.activity_date,
-          type: a.activity_type.replace(/_/g, " "),
+          type: getActivityLabel(a.activity_type),
           village: a.village_name,
           block: (a.blocks as any)?.name || (a.profiles as any)?.blocks?.name || "Unknown Block",
           block_id: a.block_id || (a.profiles as any)?.block_id || "",
@@ -347,7 +348,7 @@ function EvidencePage() {
         p.caption.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.cadre_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.village.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesType = selectedType === "All" || p.type === selectedType;
+      const matchesType = selectedType === "All" || normalizeActivityType(p.type) === selectedType;
       const matchesBlock =
         selectedBlock === "all" ||
         p.block_id === selectedBlock ||
@@ -524,10 +525,11 @@ function EvidencePage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="All">{t("all_types_label")}</SelectItem>
-                <SelectItem value="SHG Meeting">SHG Meeting</SelectItem>
-                <SelectItem value="Training">Training</SelectItem>
-                <SelectItem value="Bank Linkage">Bank Linkage</SelectItem>
-                <SelectItem value="Record Verification">Record Verification</SelectItem>
+                {ACTIVITY_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {type}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

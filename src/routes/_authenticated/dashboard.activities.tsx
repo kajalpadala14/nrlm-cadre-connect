@@ -46,25 +46,13 @@ import {
 import { BarChart3, Search, Calendar, Landmark } from "lucide-react";
 import { invalidateConsistencyQueries, useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { addActivityDraft, clearActivityDrafts, getActivityDrafts } from "@/lib/offline-drafts";
+import { ACTIVITY_TYPES, activityTypeForDB, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
 
 export const Route = createFileRoute("/_authenticated/dashboard/activities")({
   component: ActivitiesPage,
 });
 
-// Fixed 11 NRLM Activity Types
-const ACTIVITY_TYPES = [
-  "SHG Meeting",
-  "VO Meeting",
-  "Training",
-  "Farmer Visit",
-  "Livelihood Demo",
-  "Bank Linkage",
-  "Monitoring Visit",
-  "Record Verification",
-  "Community Mobilization",
-  "Enterprise Promotion",
-  "Other",
-];
+// ACTIVITY_TYPES is imported from @/constants/activityTypes (16 Hindi labels + backward compat)
 
 const MAX_PHOTOS = 10;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png"];
@@ -120,7 +108,7 @@ function ActivitiesPage() {
   const [blockId, setBlockId] = useState<string>("");
   const [panchayat, setPanchayat] = useState("");
   const [village, setVillage] = useState("");
-  const [actType, setActType] = useState("SHG Meeting");
+  const [actType, setActType] = useState<string>(ACTIVITY_TYPES[0]);
   const [description, setDescription] = useState("");
   const [beneficiaryCount, setBeneficiaryCount] = useState(0);
   const [gpsLocation, setGpsLocation] = useState("");
@@ -358,6 +346,8 @@ function ActivitiesPage() {
     const selectedBlockId = blockId || profile?.block_id || null;
     const selectedBlockName = selectedBlock ? selectedBlock.name : "Unknown Block";
 
+    const dbActivityType = activityTypeForDB(actType);
+
     const payload = {
       id: `act-${Date.now()}`,
       cadre_id: profile.id,
@@ -368,7 +358,8 @@ function ActivitiesPage() {
       block_name: selectedBlockName,
       village: village.trim(),
       panchayat: panchayat.trim(),
-      activity_type: actType,
+      activity_type: dbActivityType,
+      activity_type_label: actType,
       description: description.trim() || null,
       beneficiaries: beneficiaryCount,
       status: status,
@@ -404,20 +395,6 @@ function ActivitiesPage() {
         pdfUrl = (await uploadFile("activity-photos", pdfDoc)).publicUrl;
       }
 
-      const ACTIVITY_MAP_LOCAL: Record<string, any> = {
-        "SHG Meeting": "SHG_Meeting",
-        "VO Meeting": "Other",
-        Training: "Training_Session",
-        "Farmer Visit": "Farmer_Visit",
-        "Livelihood Demo": "Livelihood_Activity",
-        "Bank Linkage": "Other",
-        "Monitoring Visit": "Monitoring_Visit",
-        "Record Verification": "Record_Verification",
-        "Community Mobilization": "Other",
-        "Enterprise Promotion": "Livelihood_Activity",
-        Other: "Other",
-      };
-
       console.log("DEBUG SUBMIT:", {
         selectedBlockId,
         profileBlockId: profile?.block_id,
@@ -435,7 +412,7 @@ function ActivitiesPage() {
           panchayat: panchayat.trim(),
           beneficiaries: beneficiaryCount,
           gps: gpsLocation || null,
-          activity_type: ACTIVITY_MAP_LOCAL[actType] ?? "Other",
+          activity_type: dbActivityType,
           description: description.trim() || null,
           photo_url: photoUrl,
           pdf_url: pdfUrl,
@@ -500,20 +477,6 @@ function ActivitiesPage() {
     if (drafts.length === 0) return;
     setBusy(true);
     try {
-      const ACTIVITY_MAP_LOCAL: Record<string, any> = {
-        "SHG Meeting": "SHG_Meeting",
-        "VO Meeting": "Other",
-        Training: "Training_Session",
-        "Farmer Visit": "Farmer_Visit",
-        "Livelihood Demo": "Livelihood_Activity",
-        "Bank Linkage": "Other",
-        "Monitoring Visit": "Monitoring_Visit",
-        "Record Verification": "Record_Verification",
-        "Community Mobilization": "Other",
-        "Enterprise Promotion": "Livelihood_Activity",
-        Other: "Other",
-      };
-
       for (const draft of drafts) {
         const { error } = await supabase.from("activities").insert({
           cadre_id: draft.cadre_id,
@@ -523,7 +486,7 @@ function ActivitiesPage() {
           panchayat: draft.panchayat,
           beneficiaries: draft.beneficiaries,
           gps: gpsLocation || null,
-          activity_type: ACTIVITY_MAP_LOCAL[draft.activity_type] ?? "Other",
+          activity_type: activityTypeForDB(String(draft.activity_type ?? "")),
           description: draft.description,
           status: "Pending",
         });
@@ -550,11 +513,7 @@ function ActivitiesPage() {
         a.cadre_name.toLowerCase().includes(filterCadreName.toLowerCase());
       const matchesType =
         filterActType === "All" ||
-        a.activity_type.toLowerCase() === filterActType.toLowerCase() ||
-        (a.activity_type === "Livelihood Activity" && filterActType === "Livelihood Demo") ||
-        (a.activity_type === "Livelihood Demo" && filterActType === "Livelihood Activity") ||
-        (a.activity_type === "Training" && filterActType === "Training Session") ||
-        (a.activity_type === "Training_Session" && filterActType === "Training");
+        normalizeActivityType(a.activity_type) === filterActType;
       const matchesVillage =
         !filterVillage.trim() || a.village.toLowerCase().includes(filterVillage.toLowerCase());
       const matchesDate = !filterDate || a.date === filterDate;
@@ -768,8 +727,7 @@ function ActivitiesPage() {
               </div>
               <h3 className="text-2xl font-black text-slate-800 mt-2.5">
                 {
-                  filteredActivities.filter((a) => a.activity_type.toLowerCase().includes("shg"))
-                    .length
+                  filteredActivities.filter((a) => normalizeActivityType(a.activity_type) === ACTIVITY_TYPES[0]).length
                 }
               </h3>
             </div>
@@ -791,34 +749,11 @@ function ActivitiesPage() {
               </div>
               <h3 className="text-2xl font-black text-slate-800 mt-2.5">
                 {
-                  filteredActivities.filter((a) => a.activity_type.toLowerCase().includes("train"))
-                    .length
+                  filteredActivities.filter((a) => normalizeActivityType(a.activity_type) === ACTIVITY_TYPES[3]).length
                 }
               </h3>
             </div>
 
-            {/* KPI 6 */}
-            <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm hover:shadow transition-shadow">
-              <div className="flex items-center gap-2">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
-                  <MapPin className="h-5.5 w-5.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">
-                    किसान सर्वेक्षण
-                  </p>
-                  <p className="text-[9px] text-slate-400 font-semibold uppercase -mt-0.5 truncate">
-                    Farmer Visits
-                  </p>
-                </div>
-              </div>
-              <h3 className="text-2xl font-black text-slate-800 mt-2.5">
-                {
-                  filteredActivities.filter((a) => a.activity_type.toLowerCase().includes("farmer"))
-                    .length
-                }
-              </h3>
-            </div>
           </div>
 
           {/* Activity Trend Chart */}
@@ -893,13 +828,9 @@ function ActivitiesPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="All">All Types / सभी प्रकार</SelectItem>
-                        <SelectItem value="SHG Meeting">SHG Meeting</SelectItem>
-                        <SelectItem value="Training">Training</SelectItem>
-                        <SelectItem value="Farmer Visit">Farmer Visit</SelectItem>
-                        <SelectItem value="Livelihood Demo">Livelihood Demo</SelectItem>
-                        <SelectItem value="Monitoring Visit">Monitoring Visit</SelectItem>
-                        <SelectItem value="Record Verification">Record Verification</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
+                        {ACTIVITY_TYPES.map((type) => (
+                          <SelectItem key={type} value={type}>{type}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -989,7 +920,7 @@ function ActivitiesPage() {
                     </div>
                     <div className="flex flex-col pt-1">
                       <span className="text-slate-400 text-[10px] uppercase">Activity Type</span>
-                      <span className="font-bold text-slate-700">{d.activity_type}</span>
+                      <span className="font-bold text-slate-700">{getActivityLabel(d.activity_type)}</span>
                     </div>
                     <div className="flex flex-col pt-1">
                       <span className="text-slate-400 text-[10px] uppercase">Beneficiaries</span>
@@ -1044,7 +975,7 @@ function ActivitiesPage() {
                     </div>
                     <div className="flex flex-col pt-1">
                       <span className="text-slate-400 text-[10px] uppercase">Activity Type</span>
-                      <span className="font-bold text-slate-700">{a.activity_type}</span>
+                      <span className="font-bold text-slate-700">{getActivityLabel(a.activity_type)}</span>
                     </div>
                     <div className="flex flex-col pt-1">
                       <span className="text-slate-400 text-[10px] uppercase">Beneficiaries</span>
@@ -1099,7 +1030,7 @@ function ActivitiesPage() {
                       <td className="py-3.5 pr-3 text-slate-500 font-bold">{d.date}</td>
                       <td className="py-3.5 pr-3 text-slate-600 font-semibold">{d.block_name}</td>
                       <td className="py-3.5 pr-3 text-slate-600 font-semibold">{d.village}</td>
-                      <td className="py-3.5 pr-3 text-slate-800 font-bold">{d.activity_type}</td>
+                      <td className="py-3.5 pr-3 text-slate-800 font-bold">{getActivityLabel(d.activity_type)}</td>
                       <td className="py-3.5 pr-3 text-slate-500 font-medium truncate max-w-[200px]">
                         {d.description}
                       </td>
@@ -1126,7 +1057,7 @@ function ActivitiesPage() {
                       <td className="py-3.5 pr-3 text-slate-500 font-semibold">{a.date}</td>
                       <td className="py-3.5 pr-3 text-slate-600 font-semibold">{a.block_name}</td>
                       <td className="py-3.5 pr-3 text-slate-600 font-semibold">{a.village}</td>
-                      <td className="py-3.5 pr-3 text-slate-800 font-bold">{a.activity_type}</td>
+                      <td className="py-3.5 pr-3 text-slate-800 font-bold">{getActivityLabel(a.activity_type)}</td>
                       <td className="py-3.5 pr-3 text-slate-500 font-medium truncate max-w-[200px]">
                         {a.description}
                       </td>

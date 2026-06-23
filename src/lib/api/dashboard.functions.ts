@@ -14,6 +14,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
+import { getActivityLabel } from "@/constants/activityTypes";
 import { calculateAttendanceRate } from "@/lib/utils/attendance";
 
 // ─── GET DASHBOARD STATS ─────────────────────────────────────
@@ -168,7 +169,7 @@ export const getRecentActivityFeed = createServerFn({ method: "POST" })
 
     return (feed ?? []).map((item) => ({
       id: item.id,
-      type: item.activity_type,
+      type: getActivityLabel(item.activity_type),
       village: item.village_name,
       date: item.activity_date,
       submitted_at: item.submitted_at,

@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
+import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
 
 export const Route = createFileRoute("/_authenticated/dashboard/")({
   component: Overview,
@@ -98,15 +99,15 @@ function Overview() {
       const approvedActivities = allActs?.filter((a) => a.status === "Approved").length ?? 0;
       const rejectedActivities = allActs?.filter((a) => a.status === "Rejected").length ?? 0;
 
-      const farmerVisits = allActs?.filter((a) => a.activity_type === "Farmer_Visit").length ?? 0;
-      const trainings = allActs?.filter((a) => a.activity_type === "Training_Session").length ?? 0;
+      const normalizedActivityTypes = (allActs ?? []).map((a) => normalizeActivityType(a.activity_type));
+      const trainings = normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[3]).length;
       const monitorings =
-        allActs?.filter((a) => a.activity_type === "Monitoring_Visit").length ?? 0;
+        normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[10]).length;
       const verifications =
-        allActs?.filter((a) => a.activity_type === "Record_Verification").length ?? 0;
+        normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[5]).length;
       const livelihoods =
-        allActs?.filter((a) => a.activity_type === "Livelihood_Activity").length ?? 0;
-      const other = allActs?.filter((a) => a.activity_type === "Other").length ?? 0;
+        normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[1]).length;
+      const other = normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[14]).length;
 
       // 4. Activities submitted today (on dateStr)
       let actTodayQ = supabase.from("activities").select("cadre_id, village_name, panchayat, photo_url, block_id");
@@ -276,7 +277,7 @@ function Overview() {
         const profile = recentProfilesMap.get(act.cadre_id);
         const cadreName = profile?.full_name || "Unknown Cadre";
         const cadreRole = profile?.cadre_type || "PRP";
-        const typeClean = act.activity_type.replace(/_/g, " ");
+        const typeClean = getActivityLabel(act.activity_type);
 
         let firstLetter = "?";
         if (cadreName && cadreName.length > 0) {
@@ -318,7 +319,7 @@ function Overview() {
         const profile = pendingProfilesMap.get(app.cadre_id);
         const cadreName = profile?.full_name || "Unknown Cadre";
         const cadreRole = profile?.cadre_type || "PRP";
-        const detailStr = `${app.activity_type.replace(/_/g, " ")} at ${app.village_name}`;
+        const detailStr = `${getActivityLabel(app.activity_type)} at ${app.village_name}`;
         const firstLetter = cadreName.charAt(0).toUpperCase();
 
         const bgClassMap: Record<string, string> = {
@@ -356,7 +357,6 @@ function Overview() {
         pendingActivities,
         approvedActivities,
         rejectedActivities,
-        farmerVisits,
         trainings,
         monitorings,
         verifications,
@@ -507,7 +507,7 @@ function Overview() {
         .single();
 
       if (actData?.cadre_id) {
-        const typeClean = actData.activity_type.replace(/_/g, " ");
+        const typeClean = getActivityLabel(actData.activity_type);
         await supabase.from("notifications").insert({
           user_id: actData.cadre_id,
           title: "गतिविधि स्वीकृत / Activity Approved",
@@ -879,14 +879,6 @@ function Overview() {
               <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
                   <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    Farmer Visits / किसान भेंट
-                  </span>
-                  <span className="text-lg font-black text-slate-800">
-                    {dbStats?.farmerVisits ?? 0}
-                  </span>
-                </div>
-                <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
-                  <span className="text-slate-400 font-semibold block text-[9px] uppercase">
                     Trainings / प्रशिक्षण
                   </span>
                   <span className="text-lg font-black text-slate-800">
@@ -895,7 +887,7 @@ function Overview() {
                 </div>
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
                   <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    Monitoring / निगरानी
+                    क्षेत्र भ्रमण / Field Visits
                   </span>
                   <span className="text-lg font-black text-slate-800">
                     {dbStats?.monitorings ?? 0}
@@ -911,7 +903,7 @@ function Overview() {
                 </div>
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
                   <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    Livelihoods / आजीविका
+                    ग्राम संगठन बैठक / VO Meetings
                   </span>
                   <span className="text-lg font-black text-slate-800">
                     {dbStats?.livelihoods ?? 0}

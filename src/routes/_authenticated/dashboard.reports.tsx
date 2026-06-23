@@ -19,6 +19,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { exportToExcel } from "@/lib/excel";
 import { cn } from "@/lib/utils";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
+import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
 
 export const Route = createFileRoute("/_authenticated/dashboard/reports")({
   component: ReportsPage,
@@ -591,13 +592,6 @@ function ActivityReport({ from, to, blockId, selfCadreId }: { from: string; to: 
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  const ACTIVITY_TYPES = ["SHG_Meeting", "Farmer_Visit", "Training_Session", "Monitoring_Visit", "Record_Verification", "Livelihood_Activity", "Other"];
-  const ACT_LABEL: Record<string, string> = {
-    SHG_Meeting: "SHG Meeting", Farmer_Visit: "Farmer Visit", Training_Session: "Training Session",
-    Monitoring_Visit: "Monitoring Visit", Record_Verification: "Record Verification",
-    Livelihood_Activity: "Livelihood Activity", Other: "Other",
-  };
-
   const { data: raw = [], isLoading } = useQuery({
     queryKey: ["rpt-activity", from, to, blockId, selfCadreId],
     queryFn: async () => {
@@ -631,7 +625,7 @@ function ActivityReport({ from, to, blockId, selfCadreId }: { from: string; to: 
   const rows = useMemo(() => {
     return raw.filter((r: any) => {
       const name: string = (r.profiles as any)?.full_name ?? "";
-      if (actTypeFilter !== "all" && r.activity_type !== actTypeFilter) return false;
+      if (actTypeFilter !== "all" && normalizeActivityType(r.activity_type) !== actTypeFilter) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (search && !name.toLowerCase().includes(search.toLowerCase()) && !r.village_name?.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
@@ -649,7 +643,7 @@ function ActivityReport({ from, to, blockId, selfCadreId }: { from: string; to: 
         Block: (r.blocks as any)?.name || p.blocks?.name || "",
         Panchayat: r.panchayat ?? "",
         Village: r.village_name,
-        "Activity Type": ACT_LABEL[r.activity_type] ?? r.activity_type,
+        "Activity Type": getActivityLabel(r.activity_type),
         Beneficiaries: r.beneficiaries ?? 0,
         Status: r.status ?? "",
         "Photo Evidence": r.photo_url ? "Yes" : "No",
@@ -665,7 +659,7 @@ function ActivityReport({ from, to, blockId, selfCadreId }: { from: string; to: 
     (r.profiles as any)?.full_name ?? "—",
     (r.blocks as any)?.name || (r.profiles as any)?.blocks?.name || "—",
     r.village_name,
-    ACT_LABEL[r.activity_type] ?? r.activity_type,
+    getActivityLabel(r.activity_type),
     r.beneficiaries ?? 0,
     r.status ?? "—",
     r.photo_url ? "✓" : "—",
@@ -688,7 +682,7 @@ function ActivityReport({ from, to, blockId, selfCadreId }: { from: string; to: 
               <SelectTrigger className="h-9 w-44 rounded-lg border-slate-200 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
-                {ACTIVITY_TYPES.map((t) => <SelectItem key={t} value={t}>{ACT_LABEL[t]}</SelectItem>)}
+                {ACTIVITY_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

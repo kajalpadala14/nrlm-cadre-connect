@@ -18,7 +18,7 @@ export type Database = {
       activities: {
         Row: {
           activity_date: string
-          activity_type: Database["public"]["Enums"]["activity_type"]
+          activity_type: string
           approved_at: string | null
           approved_by: string | null
           beneficiaries: number | null
@@ -38,7 +38,7 @@ export type Database = {
         }
         Insert: {
           activity_date?: string
-          activity_type: Database["public"]["Enums"]["activity_type"]
+          activity_type: string
           approved_at?: string | null
           approved_by?: string | null
           beneficiaries?: number | null
@@ -58,7 +58,7 @@ export type Database = {
         }
         Update: {
           activity_date?: string
-          activity_type?: Database["public"]["Enums"]["activity_type"]
+          activity_type?: string
           approved_at?: string | null
           approved_by?: string | null
           beneficiaries?: number | null
@@ -605,6 +605,7 @@ export type Database = {
         | "Record_Verification"
         | "Livelihood_Activity"
         | "Other"
+        | string  // New Hindi labels stored as text after migration
       app_role: "admin" | "block_officer" | "cadre"
       approval_status: "pending" | "approved" | "rejected" | "revision_requested"
       attendance_status:
@@ -743,6 +744,7 @@ export const Constants = {
   public: {
     Enums: {
       activity_type: [
+        // Legacy enum values kept for backward compatibility
         "SHG_Meeting",
         "Farmer_Visit",
         "Training_Session",
@@ -750,6 +752,23 @@ export const Constants = {
         "Record_Verification",
         "Livelihood_Activity",
         "Other",
+        // New Hindi labels (stored as TEXT after migration)
+        "स्व सहायता समूह बैठक",
+        "ग्राम संगठन बैठक",
+        "संकुल संगठन बैठक",
+        "प्रशिक्षण",
+        "शिविर",
+        "पुस्तक लेखन प्रशिक्षण",
+        "बैंक लिंकेज बैठक",
+        "बैंक विज़िट",
+        "कृषि सखी बैठक",
+        "पशु सखी बैठक",
+        "IFC सर्वे",
+        "क्षेत्र भ्रमण",
+        "LSC विज़िट",
+        "ज़िला/जनपद पंचायत बैठक/प्रशिक्षण",
+        "IFC बैठक",
+        "अन्य",
       ],
       app_role: ["admin", "block_officer", "cadre"],
       approval_status: ["pending", "approved", "rejected", "revision_requested"],

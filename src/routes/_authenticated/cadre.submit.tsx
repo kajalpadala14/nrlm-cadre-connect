@@ -28,12 +28,11 @@ import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
 import { useProfile } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
 import { cn } from "@/lib/utils";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 import { addActivityDraft, clearActivityDrafts, getActivityDrafts } from "@/lib/offline-drafts";
 
-type ActivityType = Database["public"]["Enums"]["activity_type"];
+import { ACTIVITY_TYPES, activityTypeForDB, getActivityLabel } from "@/constants/activityTypes";
 
 type PhotoGpsTag = {
   latitude: number;
@@ -57,33 +56,8 @@ const isAllowedImageFile = (file: File) => {
   );
 };
 
-const ACTIVITY_TYPES_11 = [
-  "SHG Meeting",
-  "VO Meeting",
-  "Training",
-  "Farmer Visit",
-  "Livelihood Demo",
-  "Bank Linkage",
-  "Monitoring Visit",
-  "Record Verification",
-  "Community Mobilization",
-  "Enterprise Promotion",
-  "Other",
-];
-
-const ACTIVITY_MAP: Record<string, ActivityType> = {
-  "SHG Meeting": "SHG_Meeting",
-  "VO Meeting": "Other",
-  Training: "Training_Session",
-  "Farmer Visit": "Farmer_Visit",
-  "Livelihood Demo": "Livelihood_Activity",
-  "Bank Linkage": "Other",
-  "Monitoring Visit": "Monitoring_Visit",
-  "Record Verification": "Record_Verification",
-  "Community Mobilization": "Other",
-  "Enterprise Promotion": "Livelihood_Activity",
-  Other: "Other",
-};
+// Activity types are imported from @/constants/activityTypes
+// No ACTIVITY_MAP needed — new types are stored as Hindi text directly in DB
 
 const DISTRICTS = ["Dantewada"] as const;
 const DANTEWADA_BLOCK_NAMES = ["Dantewada", "Geedam", "Katekalyan", "Kuwakonda"] as const;
@@ -698,6 +672,8 @@ function SubmitPage() {
     }
     console.log("Form validation passed");
 
+    const dbActivityType = activityTypeForDB(actType);
+
     const payload = {
       id: `draft-${Date.now()}`,
       cadre_id: profile.id,
@@ -708,7 +684,7 @@ function SubmitPage() {
       block_name: selectedBlock?.name ?? "",
       panchayat: panchayat.trim(),
       village_name: village.trim(),
-      activity_type: ACTIVITY_MAP[actType] ?? "Other",
+      activity_type: dbActivityType,
       activity_type_label: actType,
       description: desc.trim() || null,
       beneficiaries: beneficiaryCount,
@@ -757,7 +733,7 @@ function SubmitPage() {
         .select("id")
         .eq("cadre_id", profile.id)
         .eq("activity_date", actDate)
-        .eq("activity_type", ACTIVITY_MAP[actType] ?? "Other")
+        .eq("activity_type", dbActivityType)
         .eq("village_name", village.trim())
         .maybeSingle();
 
@@ -781,7 +757,7 @@ function SubmitPage() {
         panchayat: panchayat.trim(),
         beneficiaries: beneficiaryCount,
         gps: gpsLocation,
-        activity_type: ACTIVITY_MAP[actType] ?? "Other",
+        activity_type: dbActivityType,
         description: desc.trim() || null,
         photo_url: photoUrl,
         pdf_url: pdfUrl,
@@ -942,7 +918,7 @@ function SubmitPage() {
           panchayat: draft.panchayat,
           beneficiaries: draft.beneficiaries,
           gps: draft.gps,
-          activity_type: draft.activity_type,
+          activity_type: activityTypeForDB(String(draft.activity_type ?? "")),
           description: draft.description,
           status: draft.status || "Pending",
         }).select("id").single();
@@ -1117,7 +1093,7 @@ function SubmitPage() {
                   <SelectValue placeholder={t("select_activity_placeholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {ACTIVITY_TYPES_11.map((t) => (
+                  {ACTIVITY_TYPES.map((t) => (
                     <SelectItem key={t} value={t}>
                       {t}
                     </SelectItem>
