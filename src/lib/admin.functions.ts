@@ -99,16 +99,38 @@ export const createUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createUserInput.parse(data))
   .handler(async ({ data, context }) => {
-    // Only admins
+    // Admins can create any role.
+    // Block officers (BPM / block_officer) can create cadres in their own block only.
     const { data: roles } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    const isAdmin = (roles ?? []).some((r) => r.role === "admin");
-    if (!isAdmin) throw new Error("Forbidden: admin only");
+    const roleList = (roles ?? []).map((r) => r.role);
+    const isAdmin = roleList.some((r) => r === "admin");
+    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+
+    if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
+
+    const systemRole = normalizeCreateUserRole(data.role);
+
+    // Block officers may only create cadres — not other admins or block officers
+    if (!isAdmin && systemRole !== "cadre") {
+      throw new Error("Forbidden: block officers can only create cadre accounts");
+    }
+
+    // Block officers may only create cadres within their own assigned block
+    if (!isAdmin && isBlockOfficer) {
+      const { data: myProfile } = await context.supabase
+        .from("profiles")
+        .select("block_id")
+        .eq("id", context.userId)
+        .single();
+      if (myProfile?.block_id && data.block_id && data.block_id !== myProfile.block_id) {
+        throw new Error("Forbidden: you can only add cadres to your own block");
+      }
+    }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const systemRole = normalizeCreateUserRole(data.role);
     const targetEmail = emailFor(data.user_id);
 
     // ── Idempotency guard ───────────────────────────────────────────────
@@ -194,9 +216,23 @@ export const deleteUser = createServerFn({ method: "POST" })
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    const isAdmin = (roles ?? []).some((r) => r.role === "admin");
-    if (!isAdmin) throw new Error("Forbidden: admin only");
+    const roleList = (roles ?? []).map((r) => r.role);
+    const isAdmin = roleList.some((r) => r === "admin");
+    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+
+    if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
     if (data.id === context.userId) throw new Error("Cannot delete yourself");
+
+    // Block officers can only delete cadres — not admins or other block officers
+    if (!isAdmin && isBlockOfficer) {
+      const { data: targetRoles } = await context.supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.id);
+      const targetIsCadre = (targetRoles ?? []).some((r) => r.role === "cadre");
+      if (!targetIsCadre) throw new Error("Forbidden: block officers can only delete cadre accounts");
+    }
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.id);
     if (error) throw new Error(error.message);
@@ -213,8 +249,22 @@ export const resetUserPin = createServerFn({ method: "POST" })
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
-    const isAdmin = (roles ?? []).some((r) => r.role === "admin");
-    if (!isAdmin) throw new Error("Forbidden: admin only");
+    const roleList = (roles ?? []).map((r) => r.role);
+    const isAdmin = roleList.some((r) => r === "admin");
+    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+
+    if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
+
+    // Block officers can only reset PINs for cadres
+    if (!isAdmin && isBlockOfficer) {
+      const { data: targetRoles } = await context.supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.id);
+      const targetIsCadre = (targetRoles ?? []).some((r) => r.role === "cadre");
+      if (!targetIsCadre) throw new Error("Forbidden: block officers can only reset cadre PINs");
+    }
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
       password: passwordFor(data.pin),
