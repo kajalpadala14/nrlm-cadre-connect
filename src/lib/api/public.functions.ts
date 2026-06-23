@@ -42,10 +42,10 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   ] = await Promise.all([
     supabaseAdmin.from("user_roles").select("user_id").eq("role", "cadre"),
     supabaseAdmin.from("blocks").select("id, name").order("name"),
-    supabaseAdmin.from("activities").select("id, block_id, village_name, activity_date, status"),
+    supabaseAdmin.from("activities").select("id, cadre_id, block_id, village_name, activity_date, status"),
     supabaseAdmin
       .from("activities")
-      .select("id, block_id, village_name, activity_date, status")
+      .select("id, cadre_id, block_id, village_name, activity_date, status")
       .gte("activity_date", sinceStr),
     supabaseAdmin.from("attendance").select("id, cadre_id, date, status").gte("date", sinceStr),
   ]);
@@ -90,14 +90,22 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   console.log("====================================");
 
   const blockData = (blocksResult.data ?? []).map((b) => {
-    const acts = activities.filter((a) => a.block_id === b.id);
+    // Resolve activities via cadre profiles because activities.block_id is often NULL.
+    // The authoritative block assignment is profiles.block_id.
+    const blockCadreIds = profiles.filter((p) => p.block_id === b.id).map((p) => p.id);
     const blockProfiles = profiles.filter((p) => p.block_id === b.id);
     const activeCadresInBlock = blockProfiles.filter((p) => (p.status ?? "Active") === "Active").length;
-    const blockCadreIds = blockProfiles.map((p) => p.id);
 
-    // Today's attendance for this block
-    const blockTodayAtt = attendance.filter((a) => blockCadreIds.includes(a.cadre_id) && a.date === todayStr);
-    const blockPresent = blockTodayAtt.filter((a) => a.status === "present").length;
+    // Match activities by cadre_id (reliable) OR block_id (set for newer submissions)
+    const acts = activities.filter(
+      (a) => a.block_id === b.id || blockCadreIds.includes(a.cadre_id ?? ""),
+    );
+
+    // Today's attendance for this block — match by cadre_id
+    const blockTodayAtt = attendance.filter(
+      (a) => blockCadreIds.includes(a.cadre_id) && a.date === todayStr,
+    );
+    const blockPresent = blockTodayAtt.filter((a) => a.status === "present" || a.status === "late").length;
     const blockLeave = blockTodayAtt.filter((a) => a.status === "on_leave").length;
     const blockAttRate = calculateAttendanceRate(blockPresent, blockLeave, activeCadresInBlock);
 

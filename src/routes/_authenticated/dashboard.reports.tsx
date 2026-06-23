@@ -195,6 +195,11 @@ function ReportsPage() {
     }
   }
 
+  // For cadre-role users: their attendance is RLS-restricted to their own cadre_id.
+  // Pass it down so AttendanceReport and ActivityReport can filter correctly.
+  const isCadreRole = highestRole(profile?.roles ?? []) === "cadre";
+  const selfCadreId = isCadreRole ? (profile?.id ?? null) : null;
+
   // Wait for profile before computing effective block (prevents wrong data on first render)
   const effectiveBlock = !scope.ready
     ? undefined
@@ -321,10 +326,10 @@ function ReportsPage() {
 
       {/* ── Active Report Panel ─────────────────────────────────── */}
       {activeTab === "attendance" && effectiveBlock !== undefined && (
-        <AttendanceReport from={from} to={to} blockId={effectiveBlock} />
+        <AttendanceReport from={from} to={to} blockId={effectiveBlock} selfCadreId={selfCadreId} />
       )}
       {activeTab === "activity" && effectiveBlock !== undefined && (
-        <ActivityReport from={from} to={to} blockId={effectiveBlock} />
+        <ActivityReport from={from} to={to} blockId={effectiveBlock} selfCadreId={selfCadreId} />
       )}
       {activeTab === "cadre_performance" && effectiveBlock !== undefined && (
         <CadrePerformanceReport from={from} to={to} blockId={effectiveBlock} />
@@ -375,7 +380,7 @@ function useDistinctCadreTypes(blockId: string | null) {
 }
 
 // ─── ATTENDANCE REPORT ────────────────────────────────────────────────────
-function AttendanceReport({ from, to, blockId }: { from: string; to: string; blockId: string | null }) {
+function AttendanceReport({ from, to, blockId, selfCadreId }: { from: string; to: string; blockId: string | null; selfCadreId: string | null }) {
   const { t } = useT();
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -384,8 +389,8 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
   // Live distinct roles for the dropdown — auto-hides absent roles
   const { data: availableRoles = [] } = useDistinctCadreTypes(blockId);
 
-  const { data: raw = [], isLoading } = useQuery({
-    queryKey: ["rpt-attendance", from, to, blockId],
+  const { data: raw = [], isLoading, error: queryError } = useQuery({
+    queryKey: ["rpt-attendance", from, to, blockId, selfCadreId],
     queryFn: async () => {
       let q = supabase
         .from("attendance")
@@ -398,14 +403,47 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
         .lte("date", to)
         .order("date", { ascending: false })
         .limit(5000);
-      if (blockId) {
+
+      if (selfCadreId) {
+        q = q.eq("cadre_id", selfCadreId);
+      } else if (blockId) {
         const cadreIds = await getCadreIdsInBlock(blockId);
         q = applyScopeToQuery(q, true, blockId, cadreIds);
       }
+
       const { data, error } = await q;
-      if (error) throw error;
+
+      // If the query failed because photo_uploaded_at column doesn't exist yet
+      // (migration not applied), fall back to a query without that column.
+      if (error) {
+        if (error.message?.includes("photo_uploaded_at") || error.code === "42703") {
+          let q2 = supabase
+            .from("attendance")
+            .select(`
+              date, status, check_in_at, check_out_at, remarks, block_id, cadre_id,
+              profiles!attendance_cadre_id_fkey(full_name, user_id, cadre_type, village,
+                blocks!profiles_block_id_fkey(name))
+            `)
+            .gte("date", from)
+            .lte("date", to)
+            .order("date", { ascending: false })
+            .limit(5000);
+          if (selfCadreId) {
+            q2 = q2.eq("cadre_id", selfCadreId);
+          } else if (blockId) {
+            const cadreIds2 = await getCadreIdsInBlock(blockId);
+            q2 = applyScopeToQuery(q2, true, blockId, cadreIds2);
+          }
+          const { data: data2, error: error2 } = await q2;
+          if (error2) throw error2;
+          return data2 ?? [];
+        }
+        throw error;
+      }
+
       return data ?? [];
     },
+    retry: false,
   });
 
   const STATUS_MAP: Record<string, string> = {
@@ -415,7 +453,7 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
     on_leave:             "On Leave",
     holiday:              "Holiday",
     pending:              "Pending",
-    pending_verification: "Pending Verification",
+    pending_verification: "Pending",
   };
 
   const rows = useMemo(() => {
@@ -423,29 +461,38 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
       const name: string = r.profiles?.full_name ?? "";
       const cadreType: string = r.profiles?.cadre_type ?? "";
       const s = r.status ?? "";
-      if (statusFilter !== "all" && s !== statusFilter) return false;
+      // "pending" filter matches both 'pending' and 'pending_verification' (legacy)
+      if (statusFilter !== "all") {
+        if (statusFilter === "pending") {
+          if (s !== "pending" && s !== "pending_verification") return false;
+        } else {
+          if (s !== statusFilter) return false;
+        }
+      }
       if (roleFilter !== "all" && cadreType !== roleFilter) return false;
       if (search && !name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
   }, [raw, statusFilter, roleFilter, search]);
 
-  const tableHeaders = ["Date", "Cadre Name", "User ID", "Role / Cadre Type", "Block", "Village", "Status", "Check-In", "Check-Out", "Photo Upload Time", "Remarks"];
+  const tableHeaders = ["Date", "Cadre Name", "User ID", "Role / Cadre Type", "Block", "Village", "Status", "Check-In", "Check-Out", "Remarks"];
   const tableRows = rows.slice(0, 200).map((r: any) => {
     const p = r.profiles ?? {};
     const checkIn = r.check_in_at ? new Date(r.check_in_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
     const checkOut = r.check_out_at ? new Date(r.check_out_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
-    const photoUpload = r.photo_uploaded_at ? new Date(r.photo_uploaded_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
-    return [r.date, p.full_name ?? "—", p.user_id ?? "—", ROLE_LABEL_MAP[p.cadre_type] ?? p.cadre_type ?? "—", p.blocks?.name ?? "—", p.village ?? "—", STATUS_MAP[r.status] ?? r.status, checkIn, checkOut, photoUpload, r.remarks ?? "—"];
+    return [r.date, p.full_name ?? "—", p.user_id ?? "—", ROLE_LABEL_MAP[p.cadre_type] ?? p.cadre_type ?? "—", p.blocks?.name ?? "—", p.village ?? "—", STATUS_MAP[r.status] ?? r.status, checkIn, checkOut, r.remarks ?? "—"];
   });
 
-  // Summary counts for the footer
-  const presentTotal = rows.filter((r: any) => r.status === "present").length;
-  const lateTotal    = rows.filter((r: any) => r.status === "late").length;
-  const absentTotal  = rows.filter((r: any) => r.status === "absent").length;
-  const pendingTotal = rows.filter((r: any) => r.status === "pending" || r.status === "pending_verification").length;
-  const summaryFooter = rows.length > 0
-    ? `Summary: Present ${presentTotal} | Late ${lateTotal} | Absent ${absentTotal} | Pending ${pendingTotal}`
+  // Summary counts — always computed from the full raw dataset (unaffected by
+  // the status/role/search filters above) so the footer always shows the complete
+  // breakdown for the selected date range, not just the currently visible subset.
+  const presentTotal = raw.filter((r: any) => r.status === "present").length;
+  const lateTotal    = raw.filter((r: any) => r.status === "late").length;
+  const absentTotal  = raw.filter((r: any) => r.status === "absent").length;
+  const pendingTotal = raw.filter((r: any) => r.status === "pending" || r.status === "pending_verification").length;
+  const leaveTotal   = raw.filter((r: any) => r.status === "on_leave").length;
+  const summaryFooter = raw.length > 0
+    ? `Total records in range — Present: ${presentTotal} | Late: ${lateTotal} | Absent: ${absentTotal} | Pending: ${pendingTotal} | On Leave: ${leaveTotal}`
     : undefined;
 
   function buildExportRows() {
@@ -461,13 +508,24 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
         Status: STATUS_MAP[r.status] ?? r.status,
         "Check-In": r.check_in_at ? new Date(r.check_in_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
         "Check-Out": r.check_out_at ? new Date(r.check_out_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
-        "Photo Upload Time": r.photo_uploaded_at ? new Date(r.photo_uploaded_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
         Remarks: r.remarks ?? "",
       };
     });
   }
 
   const slug = `attendance-report-${fmt(from)}-to-${fmt(to)}`;
+
+  // If query errored out, show the error message instead of spinning forever
+  if (queryError) {
+    return (
+      <div className="rounded-2xl border border-rose-100 bg-rose-50 px-5 py-4 text-sm font-bold text-rose-700">
+        ⚠️ Attendance data could not be loaded: {(queryError as Error).message}
+        <p className="text-xs font-semibold text-rose-500 mt-1">
+          If this says "column photo_uploaded_at does not exist", apply the pending database migration in Supabase.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <ReportPanel
@@ -528,7 +586,7 @@ function AttendanceReport({ from, to, blockId }: { from: string; to: string; blo
 }
 
 // ─── ACTIVITY REPORT ──────────────────────────────────────────────────────
-function ActivityReport({ from, to, blockId }: { from: string; to: string; blockId: string | null }) {
+function ActivityReport({ from, to, blockId, selfCadreId }: { from: string; to: string; blockId: string | null; selfCadreId: string | null }) {
   const [actTypeFilter, setActTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -541,7 +599,7 @@ function ActivityReport({ from, to, blockId }: { from: string; to: string; block
   };
 
   const { data: raw = [], isLoading } = useQuery({
-    queryKey: ["rpt-activity", from, to, blockId],
+    queryKey: ["rpt-activity", from, to, blockId, selfCadreId],
     queryFn: async () => {
       let q = supabase
         .from("activities")
@@ -555,10 +613,15 @@ function ActivityReport({ from, to, blockId }: { from: string; to: string; block
         .lte("activity_date", to)
         .order("activity_date", { ascending: false })
         .limit(5000);
-      if (blockId) {
+
+      if (selfCadreId) {
+        // Cadre-role user: scope to their own activities
+        q = q.eq("cadre_id", selfCadreId);
+      } else if (blockId) {
         const cadreIds = await getCadreIdsInBlock(blockId);
         q = applyScopeToQuery(q, true, blockId, cadreIds);
       }
+
       const { data, error } = await q;
       if (error) throw error;
       return data ?? [];

@@ -392,8 +392,8 @@ function Overview() {
   };
 
   // ── Attendance Detail Sheet ──────────────────────────────────────────────
-  // null = closed. Business attendance statuses open a detail sheet.
-  const [attSheetStatus, setAttSheetStatus] = useState<"present" | "late" | "absent" | "pending_verification" | null>(null);
+  // null = closed. "pending" covers both pending + pending_verification rows.
+  const [attSheetStatus, setAttSheetStatus] = useState<"present" | "late" | "absent" | "pending" | null>(null);
 
   // Lazy query — only fires when admin clicks a View button (enabled: !!attSheetStatus).
   // Fetches ONLY cadres that have an attendance record matching the chosen status on dateStr.
@@ -411,8 +411,15 @@ function Overview() {
       let attQ = supabase
         .from("attendance")
         .select("cadre_id, status, check_in_at, block_id")
-        .eq("date", dateStr)
-        .eq("status", attSheetStatus);
+        .eq("date", dateStr);
+
+      // "pending" covers both the new 'pending' value and the legacy 'pending_verification' value
+      if (attSheetStatus === "pending") {
+        attQ = attQ.in("status", ["pending", "pending_verification"]);
+      } else {
+        attQ = attQ.eq("status", attSheetStatus);
+      }
+
       if (blockId !== "all" && blockId) {
         const cadreIds = await getCadreIdsInBlock(blockId);
         attQ = applyScopeToQuery(attQ, true, blockId, cadreIds);
@@ -471,7 +478,7 @@ function Overview() {
         ? "Late Cadres / Late Attendance"
         : attSheetStatus === "absent"
           ? "Absent Cadres / Absent Attendance"
-          : attSheetStatus === "pending_verification"
+          : attSheetStatus === "pending"
             ? "Pending Cadres / Pending Attendance"
             : "";
 
@@ -530,7 +537,7 @@ function Overview() {
                 {attSheetStatus === "present" && <CheckCircle className="h-4 w-4 text-emerald-500" />}
                 {attSheetStatus === "late" && <Clock className="h-4 w-4 text-orange-500" />}
                 {attSheetStatus === "absent" && <XCircle className="h-4 w-4 text-rose-500" />}
-                {attSheetStatus === "pending_verification" && <Hourglass className="h-4 w-4 text-yellow-500" />}
+                {attSheetStatus === "pending" && <Hourglass className="h-4 w-4 text-yellow-500" />}
                 {sheetTitle}
               </SheetTitle>
               <span className="text-[10px] font-bold text-slate-400 uppercase">{dateStr}</span>
@@ -551,7 +558,7 @@ function Overview() {
                 {attSheetStatus === "present" && <CheckCircle className="h-8 w-8 text-slate-200" />}
                 {attSheetStatus === "late" && <Clock className="h-8 w-8 text-slate-200" />}
                 {attSheetStatus === "absent" && <XCircle className="h-8 w-8 text-slate-200" />}
-                {attSheetStatus === "pending_verification" && <Hourglass className="h-8 w-8 text-slate-200" />}
+                {attSheetStatus === "pending" && <Hourglass className="h-8 w-8 text-slate-200" />}
                 <p className="text-xs font-bold">
                   {attSheetStatus === "present"
                     ? "कोई उपस्थित नहीं / No cadres present"
@@ -573,7 +580,7 @@ function Overview() {
                       row.status === "present" && "bg-emerald-100 text-emerald-700",
                       row.status === "late" && "bg-orange-100 text-orange-700",
                       row.status === "absent" && "bg-rose-100 text-rose-700",
-                      row.status === "pending_verification" && "bg-yellow-100 text-yellow-700",
+                      row.status === "pending" && "bg-yellow-100 text-yellow-700",
                     )}>
                       {row.name.charAt(0).toUpperCase()}
                     </div>
@@ -595,12 +602,12 @@ function Overview() {
                       row.status === "present" && "bg-emerald-50 text-emerald-700",
                       row.status === "late" && "bg-orange-50 text-orange-700",
                       row.status === "absent" && "bg-rose-50 text-rose-700",
-                      row.status === "pending_verification" && "bg-yellow-50 text-yellow-700",
+                      row.status === "pending" && "bg-yellow-50 text-yellow-700",
                     )}>
                       {row.status === "present" && <CheckCircle className="h-3 w-3" />}
                       {row.status === "late" && <Clock className="h-3 w-3" />}
                       {row.status === "absent" && <XCircle className="h-3 w-3" />}
-                      {row.status === "pending_verification" && <Hourglass className="h-3 w-3" />}
+                      {row.status === "pending" && <Hourglass className="h-3 w-3" />}
                       {row.status === "present" ? "Present" : row.status === "late" ? "Late" : row.status === "absent" ? "Absent" : "Pending"}
                     </span>
                     {row.checkIn !== "—" && (
@@ -696,7 +703,7 @@ function Overview() {
             </button>
 
             <button
-              onClick={() => { console.log("[KPI] Pending View clicked, setting attSheetStatus=pending_verification"); setAttSheetStatus("pending_verification"); }}
+              onClick={() => setAttSheetStatus("pending")}
               className="w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-yellow-50 transition-colors group"
             >
               <div className="flex items-center gap-2">

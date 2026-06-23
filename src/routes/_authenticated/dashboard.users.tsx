@@ -114,6 +114,7 @@ function UsersPage() {
   const [isCadreSaving, setIsCadreSaving] = useState(false);
   const cadreSaveInFlightRef = useRef(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "Active" | "Inactive">("all");
 
   // Staff tab state
   const [staffOpen, setStaffOpen] = useState(false);
@@ -398,11 +399,17 @@ function UsersPage() {
 
   const filteredCadres = cadres.filter(
     (c) =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.user_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase())),
+      (statusFilter === "all" || c.status === statusFilter) &&
+      (
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.user_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase()))
+      ),
   );
+
+  const activeCount   = cadres.filter((c) => c.status === "Active").length;
+  const inactiveCount = cadres.filter((c) => c.status === "Inactive").length;
 
   const filteredStaff = staffList.filter((s) => {
     const q = searchTerm.toLowerCase();
@@ -550,6 +557,26 @@ function UsersPage() {
                 placeholder="Search by name, Cadre ID, role, block..."
                 className="h-10 flex-1 sm:w-64 rounded-xl border-slate-200 bg-white text-xs shadow-sm focus:ring-1 min-w-0"
               />
+              {/* Status filter */}
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => setStatusFilter(v as "all" | "Active" | "Inactive")}
+              >
+                <SelectTrigger className="h-10 w-36 shrink-0 rounded-xl border-slate-200 bg-white text-xs font-bold shadow-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    All ({cadres.length})
+                  </SelectItem>
+                  <SelectItem value="Active">
+                    ✅ Active ({activeCount})
+                  </SelectItem>
+                  <SelectItem value="Inactive">
+                    ❌ Inactive ({inactiveCount})
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <Button
                 onClick={handleOpenAdd}
                 className="h-10 rounded-xl px-4 font-bold shadow-md shrink-0"
