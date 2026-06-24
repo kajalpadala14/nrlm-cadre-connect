@@ -18,6 +18,10 @@ import {
   XCircle,
   Clock,
   CalendarDays,
+  X,
+  FileText,
+  Users,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,6 +31,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
 
@@ -45,6 +52,55 @@ function Overview() {
   const date = new Date();
   const [dashboardTab, setDashboardTab] = useState<"operations" | "analytics">("operations");
   const qc = useQueryClient();
+
+  const [viewingActivityId, setViewingActivityId] = useState<string | null>(null);
+  const [rejectionComment, setRejectionComment] = useState("");
+  const [showRejectInput, setShowRejectInput] = useState(false);
+
+  const { data: viewingActivity, isLoading: isViewingActivityLoading } = useQuery({
+    queryKey: ["activity-detail", viewingActivityId],
+    enabled: !!viewingActivityId,
+    queryFn: async () => {
+      if (!viewingActivityId) return null;
+      const { data: act, error: actError } = await supabase
+        .from("activities")
+        .select("*")
+        .eq("id", viewingActivityId)
+        .single();
+      if (actError) throw actError;
+
+      const { data: profile, error: profError } = await supabase
+        .from("profiles")
+        .select("full_name, cadre_type, block_id")
+        .eq("id", act.cadre_id)
+        .single();
+      if (profError) throw profError;
+
+      const { data: blocks } = await supabase
+        .from("blocks")
+        .select("name")
+        .eq("id", act.block_id || profile.block_id)
+        .single();
+
+      const { data: evidenceFiles } = await supabase
+        .from("evidence_files")
+        .select("public_url")
+        .eq("activity_id", act.id)
+        .like("mime_type", "image/%")
+        .order("created_at", { ascending: true });
+
+      const photo = evidenceFiles?.[0]?.public_url || act.photo_url || "";
+      const blockName = blocks?.name || "Unknown Block";
+
+      return {
+        ...act,
+        cadre_name: profile.full_name,
+        role: profile.cadre_type,
+        photo,
+        blockName,
+      };
+    },
+  });
 
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
@@ -201,10 +257,11 @@ function Overview() {
 
         blocksList = blocksData.map((b) => {
           const cadresInBlock = profs?.filter((p) => p.block_id === b.id) ?? [];
-          const total = cadresInBlock.length;
+          // Include cadres that have attendance records for this block (covers profiles with null block_id)
+          const attsInBlock = atts?.filter((a) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) ?? [];
+          const attendanceCadreIds = attsInBlock.map((a) => a.cadre_id);
+          const total = new Set([...cadresInBlock.map((p) => p.id), ...attendanceCadreIds]).size;
 
-          const submittedAttInBlock =
-            atts?.filter((a) => (a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) && (a.status === "present" || a.status === "late")) ?? [];
           const active = cadresInBlock.filter((p) => (p.status ?? "Active") === "Active").length;
           const inactive = cadresInBlock.filter((p) => p.status === "Inactive").length;
 
@@ -214,6 +271,8 @@ function Overview() {
           const uniqueVillages = new Set(actsInBlock.map((a) => a.village_name));
           const villages = uniqueVillages.size;
 
+          const submittedAttInBlock = attsInBlock.filter((a) => ['present', 'late'].includes(a.status));
+          
           const attendance =
             total > 0 ? ((submittedAttInBlock.length / total) * 100).toFixed(2) + "%" : "0.00%";
 
@@ -525,6 +584,52 @@ function Overview() {
     }
   };
 
+  const handleReject = async (id: string, name: string, comment: string) => {
+    if (!comment.trim()) {
+      toast.error("टिप्पणी आवश्यक है / Rejection comment is required");
+      return;
+    }
+    try {
+      const now = new Date().toISOString();
+      const approverId = adminProfile?.id ?? null;
+
+      const { error } = await supabase
+        .from("activities")
+        .update({
+          status: "Rejected",
+          comment: comment,
+          approved_at: now,
+          approved_by: approverId,
+        })
+        .eq("id", id);
+      if (error) throw error;
+
+      // Look up the cadre_id for this activity to send notification
+      const { data: actData } = await supabase
+        .from("activities")
+        .select("cadre_id, activity_type, activity_date, village_name")
+        .eq("id", id)
+        .single();
+
+      if (actData?.cadre_id) {
+        const typeClean = getActivityLabel(actData.activity_type);
+        await supabase.from("notifications").insert({
+          user_id: actData.cadre_id,
+          title: "गतिविधि अस्वीकृत / Activity Rejected",
+          message: `आपकी ${actData.activity_date} की '${typeClean}' गतिविधि अस्वीकृत कर दी गई है। कारण: ${comment} / Your activity '${typeClean}' for ${actData.activity_date} has been rejected. Reason: ${comment}`,
+          type: "error",
+          read: false,
+        });
+      }
+
+      toast.warning(`अस्वीकृत / Rejected: ${name}`);
+      qc.invalidateQueries({ queryKey: ["dash-stats-raw"] });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Error: ${msg}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
 
@@ -623,6 +728,179 @@ function Overview() {
 
           <div className="border-t border-slate-100 px-5 py-3 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
             <span>{attDetailLoading ? "Loading…" : `${attDetailRows.length} cadre${attDetailRows.length !== 1 ? "s" : ""}`}</span>
+            <span>Date: {dateStr}</span>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Activity Detail Sheet ── */}
+      <Sheet open={!!viewingActivityId} onOpenChange={(open) => { 
+        if (!open) {
+          setViewingActivityId(null);
+          setShowRejectInput(false);
+          setRejectionComment("");
+        }
+      }}>
+        <SheetContent side="right" className="w-full sm:max-w-lg p-0 flex flex-col">
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <SheetTitle className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                गतिविधि विवरण / Activity Details
+              </SheetTitle>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                {viewingActivity?.activity_date}
+              </span>
+            </div>
+          </SheetHeader>
+
+          {isViewingActivityLoading ? (
+            <div className="flex-1 p-5 space-y-4">
+              <div className="h-6 w-32 bg-slate-100/60 rounded animate-pulse" />
+              <div className="h-4 w-48 bg-slate-100/60 rounded animate-pulse" />
+              <div className="h-32 bg-slate-100/60 rounded-xl animate-pulse" />
+              <div className="h-10 bg-slate-100/60 rounded-lg animate-pulse" />
+            </div>
+          ) : viewingActivity ? (
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+              {/* Photo Evidence */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                  फोटो साक्ष्य / Photo Evidence
+                </span>
+                <div className="relative rounded-xl border border-slate-100 bg-slate-50 overflow-hidden aspect-video flex items-center justify-center">
+                  {viewingActivity.photo ? (
+                    <img
+                      src={viewingActivity.photo}
+                      alt="Evidence"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-slate-300 flex flex-col items-center justify-center p-6 text-center">
+                      <ImageIcon className="h-10 w-10 text-slate-300 mb-1" />
+                      <p className="text-[11px] font-semibold">कोई फोटो नहीं / No photo evidence</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Cadre Details */}
+              <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg font-bold bg-blue-100 text-blue-800 text-xs shrink-0">
+                    {viewingActivity.cadre_name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-slate-700 truncate">{viewingActivity.cadre_name}</p>
+                    <p className="text-[10px] font-semibold text-blue-600 mt-0.5">{viewingActivity.role}</p>
+                  </div>
+                </div>
+                <div className="border-t border-slate-100/60 pt-3 grid grid-cols-2 gap-3 text-[11px]">
+                  <div>
+                    <span className="text-slate-400 font-bold block uppercase tracking-wide text-[9px]">Block / विकासखंड</span>
+                    <span className="text-slate-700 font-bold">{viewingActivity.blockName}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold block uppercase tracking-wide text-[9px]">Village / ग्राम</span>
+                    <span className="text-slate-700 font-bold">{viewingActivity.village_name}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Activity Details */}
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                    गतिविधि का प्रकार / Activity Type
+                  </span>
+                  <p className="text-xs font-black text-slate-700 flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-slate-400" />
+                    {getActivityLabel(viewingActivity.activity_type)}
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                    विवरण / Description
+                  </span>
+                  <p className="text-xs text-slate-600 font-medium leading-relaxed bg-slate-50/50 border border-slate-100 rounded-xl p-3">
+                    {viewingActivity.description || "विवरण नहीं दिया गया है / No description provided."}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-50/50 rounded-xl p-3 border border-slate-100 w-max">
+                  <Users className="h-4 w-4 text-slate-400" />
+                  <span>लाभार्थी संख्या / Beneficiaries:</span>
+                  <span className="text-slate-800 font-extrabold">{viewingActivity.beneficiaries || 0}</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              {viewingActivity.status === "Pending" && (
+                <div className="border-t border-slate-100 pt-4 space-y-3">
+                  {showRejectInput ? (
+                    <div className="space-y-2.5">
+                      <Label className="text-slate-500 font-bold text-[10px] uppercase">
+                        अस्वीकार करने का कारण / Rejection Comment
+                      </Label>
+                      <Input
+                        value={rejectionComment}
+                        onChange={(e) => setRejectionComment(e.target.value)}
+                        placeholder="Please enter a reason for rejection..."
+                        className="h-9 text-xs rounded-lg border-slate-200"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={() => setShowRejectInput(false)}
+                          variant="outline"
+                          className="flex-1 h-9 rounded-lg font-bold text-xs"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            handleReject(viewingActivity.id, viewingActivity.cadre_name, rejectionComment);
+                            setViewingActivityId(null);
+                            setShowRejectInput(false);
+                            setRejectionComment("");
+                          }}
+                          className="flex-1 h-9 rounded-lg bg-rose-600 text-white hover:bg-rose-700 font-bold text-xs"
+                        >
+                          Submit Rejection
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2.5">
+                      <Button
+                        onClick={() => setShowRejectInput(true)}
+                        className="flex-1 h-9.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 font-bold text-xs shadow-sm flex items-center justify-center gap-1"
+                      >
+                        <X className="h-4 w-4" />
+                        अस्वीकार करें / Reject
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          handleApprove(viewingActivity.id, viewingActivity.cadre_name);
+                          setViewingActivityId(null);
+                        }}
+                        className="flex-1 h-9.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-bold text-xs shadow-sm flex items-center justify-center gap-1"
+                      >
+                        <Check className="h-4 w-4" />
+                        स्वीकार करें / Approve
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-slate-400 text-xs">
+              त्रुटि: गतिविधि लोड नहीं की जा सकी / Error loading activity.
+            </div>
+          )}
+
+          <div className="border-t border-slate-100 px-5 py-3 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
+            <span>Status: {viewingActivity?.status || "Pending"}</span>
             <span>Date: {dateStr}</span>
           </div>
         </SheetContent>
@@ -1158,9 +1436,7 @@ function Overview() {
                           </span>
                           <div className="flex gap-1.5">
                             <button
-                              onClick={() =>
-                                toast.info(`Viewing details of submission for ${app.cadre}`)
-                              }
+                              onClick={() => setViewingActivityId(app.id)}
                               className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 transition-colors inline-flex items-center gap-1"
                             >
                               <Eye className="h-3 w-3" />

@@ -325,9 +325,10 @@ function SubmitPage() {
       if (districtQuery.error) {
         console.warn("[Location] District-aware blocks query failed, retrying legacy schema:", districtQuery.error);
         const legacyQuery = await supabase.from("blocks").select("id,name").order("name");
-        const legacyBlocks = ((legacyQuery.data ?? []) as BlockOption[]).filter((block) =>
-          DANTEWADA_BLOCK_NAMES.includes(block.name as (typeof DANTEWADA_BLOCK_NAMES)[number]),
-        );
+        const legacyBlocks = ((legacyQuery.data ?? []) as BlockOption[]).filter((block) => {
+          const cleanName = block.name.replace(/\s*\(.*?\)\s*/g, "").trim();
+          return DANTEWADA_BLOCK_NAMES.includes(cleanName as (typeof DANTEWADA_BLOCK_NAMES)[number]);
+        });
 
         console.log("[Location] Legacy blocks query response:", legacyQuery);
         console.log("[Location] Legacy Dantewada blocks returned:", legacyBlocks.length);
