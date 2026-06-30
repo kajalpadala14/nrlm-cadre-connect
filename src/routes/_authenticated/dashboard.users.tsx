@@ -25,7 +25,7 @@ import { useT } from "@/lib/i18n";
 import { useProfile, highestRole } from "@/hooks/use-auth";
 import { getUserDataScope } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
-import { createUser, deleteUser, resetUserPin } from "@/lib/admin.functions";
+import { createUser, deleteUser, resetUserPin, updateUserProfile } from "@/lib/admin.functions";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
 
 export const Route = createFileRoute("/_authenticated/dashboard/users")({
@@ -330,12 +330,12 @@ function UsersPage() {
         if (!editingCadre.id) {
           throw new Error("Missing cadre record id. Please reopen the form and try again.");
         }
-        // Edit in profiles directly
-        const updateResult = await supabase
-          .from("profiles")
-          .update({
+        await updateUserProfile({
+          data: {
+            id: editingCadre.id,
             full_name: form.name,
             phone: form.phone || null,
+            role: "cadre",
             cadre_type: form.role as any,
             block_id: scope.isScoped && scope.blockId ? scope.blockId : (form.block_id || null),
             village: village || null,
@@ -343,15 +343,8 @@ function UsersPage() {
             gender: form.gender || null,
             join_date: form.join_date || null,
             status: form.status || null,
-          })
-          .eq("id", editingCadre.id)
-          .select("id, user_id")
-          .maybeSingle();
-
-        if (updateResult.error) throw updateResult.error;
-        if (!updateResult.data) {
-          throw new Error("Cadre record was not found. No new record was created.");
-        }
+          },
+        });
 
         // Check if PIN was changed
         if (form.pin && form.pin !== "••••") {
@@ -486,20 +479,15 @@ function UsersPage() {
         if (!editingStaff.id) {
           throw new Error("Missing staff record id. Please reopen the form and try again.");
         }
-        const updateResult = await supabase
-          .from("profiles")
-          .update({
+        await updateUserProfile({
+          data: {
+            id: editingStaff.id,
             full_name: staffForm.name,
             phone: staffForm.phone || null,
+            role: staffSystemRole,
             block_id: staffSystemRole === "block_officer" ? (staffForm.block_id || null) : null,
-          })
-          .eq("id", editingStaff.id)
-          .select("id, user_id")
-          .maybeSingle();
-        if (updateResult.error) throw updateResult.error;
-        if (!updateResult.data) {
-          throw new Error("Staff record was not found. No new record was created.");
-        }
+          },
+        });
 
         if (staffForm.pin && staffForm.pin !== "••••") {
           if (!/^[0-9]{4}$/.test(staffForm.pin)) {

@@ -143,7 +143,7 @@ function Overview() {
       ).length ?? 0;
       const leaveCount = attData?.filter((a) => a.status === "on_leave").length ?? 0;
 
-      // 3. Activities counts (overall / lifetime)
+      // 3. Activities counts (overall / lifetime) — used for status counts
       let actAllQ = supabase.from("activities").select("status, activity_type, cadre_id, block_id");
       if (blockId !== "all" && blockId) {
         actAllQ = applyScopeToQuery(actAllQ, true, blockId, cadreIds);
@@ -155,23 +155,25 @@ function Overview() {
       const approvedActivities = allActs?.filter((a) => a.status === "Approved").length ?? 0;
       const rejectedActivities = allActs?.filter((a) => a.status === "Rejected").length ?? 0;
 
-      const normalizedActivityTypes = (allActs ?? []).map((a) => normalizeActivityType(a.activity_type));
-      const trainings = normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[3]).length;
-      const monitorings =
-        normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[10]).length;
-      const verifications =
-        normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[5]).length;
-      const livelihoods =
-        normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[1]).length;
-      const other = normalizedActivityTypes.filter((type) => type === ACTIVITY_TYPES[14]).length;
+      // Activity type breakdown — based on TODAY's activities only (actTodayRows fetched below)
+      // We compute these after fetching actTodayRows. Placeholders here, computed below.
 
-      // 4. Activities submitted today (on dateStr)
-      let actTodayQ = supabase.from("activities").select("cadre_id, village_name, panchayat, photo_url, block_id");
+      // 4. Activities submitted today (on dateStr) — also used for type breakdown
+      let actTodayQ = supabase.from("activities").select("cadre_id, village_name, panchayat, photo_url, block_id, activity_type");
       if (blockId !== "all" && blockId) {
         actTodayQ = applyScopeToQuery(actTodayQ, true, blockId, cadreIds);
       }
       actTodayQ = actTodayQ.eq("activity_date", dateStr);
       const { data: actTodayRows } = await actTodayQ;
+
+      // Activity type breakdown based on TODAY's activities
+      const normalizedTodayTypes = (actTodayRows ?? []).map((a) => normalizeActivityType(a.activity_type));
+      const trainings = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[3]).length;
+      const monitorings = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[10]).length;
+      const verifications = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[5]).length;
+      const livelihoods = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[1]).length;
+      const shgMeetings = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[0]).length;
+      const other = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[14]).length;
 
       const villagesToday = new Set((actTodayRows ?? []).map((r) => r.village_name));
       const panchayatsToday = new Set((actTodayRows ?? []).map((r) => r.panchayat).filter(Boolean));
@@ -420,6 +422,7 @@ function Overview() {
         monitorings,
         verifications,
         livelihoods,
+        shgMeetings,
         other,
         pendingActivitiesList: formattedPendingList,
         blocksList,
@@ -1149,18 +1152,29 @@ function Overview() {
               </div>
             </div>
 
-            {/* Activity Summary Counts by Type (No SHG) */}
+            {/* Activity Summary Counts by Type — TODAY's activities */}
             <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-                गतिविधि सारांश / Activity Summary
-              </h3>
-              <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                  गतिविधि सारांश / Activity Summary
+                </h3>
+                <span className="text-[9px] font-bold text-blue-500 bg-blue-50 rounded-full px-2 py-0.5 uppercase tracking-wide">आज / Today</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
                   <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    Trainings / प्रशिक्षण
+                    SHG बैठक / SHG Meeting
                   </span>
                   <span className="text-lg font-black text-slate-800">
-                    {dbStats?.trainings ?? 0}
+                    {dbStats?.shgMeetings ?? 0}
+                  </span>
+                </div>
+                <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
+                  <span className="text-slate-400 font-semibold block text-[9px] uppercase">
+                    ग्राम सं. बैठक / VO Meeting
+                  </span>
+                  <span className="text-lg font-black text-slate-800">
+                    {dbStats?.livelihoods ?? 0}
                   </span>
                 </div>
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
@@ -1173,7 +1187,15 @@ function Overview() {
                 </div>
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
                   <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    Verification / सत्यापन
+                    प्रशिक्षण / Trainings
+                  </span>
+                  <span className="text-lg font-black text-slate-800">
+                    {dbStats?.trainings ?? 0}
+                  </span>
+                </div>
+                <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
+                  <span className="text-slate-400 font-semibold block text-[9px] uppercase">
+                    सत्यापन / Verification
                   </span>
                   <span className="text-lg font-black text-slate-800">
                     {dbStats?.verifications ?? 0}
@@ -1181,15 +1203,7 @@ function Overview() {
                 </div>
                 <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
                   <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    ग्राम संगठन बैठक / VO Meetings
-                  </span>
-                  <span className="text-lg font-black text-slate-800">
-                    {dbStats?.livelihoods ?? 0}
-                  </span>
-                </div>
-                <div className="border border-slate-100 rounded-xl p-2.5 bg-slate-50/50">
-                  <span className="text-slate-400 font-semibold block text-[9px] uppercase">
-                    Other / अन्य
+                    अन्य / Other
                   </span>
                   <span className="text-lg font-black text-slate-800">{dbStats?.other ?? 0}</span>
                 </div>

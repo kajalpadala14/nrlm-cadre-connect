@@ -95,6 +95,23 @@ const createUserInput = z.object({
   status: z.enum(["Active", "Inactive"]).nullable().optional(),
 });
 
+const updateUserInput = z.object({
+  id: z.string().uuid(),
+  full_name: z.string().trim().min(1).max(120),
+  phone: z.string().trim().max(20).optional().nullable(),
+  role: z.enum(["admin", "block_officer", "cadre"]).optional(),
+  cadre_type: z
+    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP"])
+    .nullable()
+    .optional(),
+  block_id: z.string().uuid().nullable().optional(),
+  village: z.string().trim().max(CADRE_LOCATION_MAX_LENGTH).nullable().optional(),
+  panchayat: z.string().trim().max(CADRE_LOCATION_MAX_LENGTH).nullable().optional(),
+  gender: z.string().trim().max(20).nullable().optional(),
+  join_date: z.string().trim().nullable().optional(),
+  status: z.enum(["Active", "Inactive"]).nullable().optional(),
+});
+
 export const createUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createUserInput.parse(data))
@@ -206,6 +223,78 @@ export const createUser = createServerFn({ method: "POST" })
       throw new Error(rErr.message);
     }
     return { id: newId };
+  });
+
+export const updateUserProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => updateUserInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { data: roles } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId);
+    const roleList = (roles ?? []).map((r) => r.role);
+    const isAdmin = roleList.some((r) => r === "admin");
+    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+
+    if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: targetRoles, error: targetRolesError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.id);
+    if (targetRolesError) throw new Error(targetRolesError.message);
+    const targetRoleList = (targetRoles ?? []).map((r) => r.role);
+    const targetIsCadre = targetRoleList.includes("cadre");
+
+    if (!isAdmin && isBlockOfficer) {
+      if (!targetIsCadre) throw new Error("Forbidden: block officers can only edit cadre accounts");
+
+      const { data: myProfile, error: myProfileError } = await context.supabase
+        .from("profiles")
+        .select("block_id")
+        .eq("id", context.userId)
+        .single();
+      if (myProfileError) throw new Error(myProfileError.message);
+
+      const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
+        .from("profiles")
+        .select("block_id")
+        .eq("id", data.id)
+        .single();
+      if (targetProfileError) throw new Error(targetProfileError.message);
+
+      if (!myProfile?.block_id || targetProfile?.block_id !== myProfile.block_id) {
+        throw new Error("Forbidden: you can only edit cadres in your own block");
+      }
+      if (data.block_id && data.block_id !== myProfile.block_id) {
+        throw new Error("Forbidden: you cannot move cadres outside your block");
+      }
+    }
+
+    const updates = {
+      full_name: data.full_name,
+      phone: data.phone ?? null,
+      cadre_type: targetIsCadre ? (data.cadre_type ?? null) : null,
+      block_id: data.block_id ?? null,
+      village: targetIsCadre ? (data.village ?? null) : null,
+      panchayat: targetIsCadre ? (data.panchayat ?? null) : null,
+      gender: targetIsCadre ? (data.gender ?? null) : null,
+      join_date: targetIsCadre ? (data.join_date ?? null) : null,
+      status: targetIsCadre ? (data.status ?? null) : null,
+    };
+
+    const { data: updated, error } = await supabaseAdmin
+      .from("profiles")
+      .update(updates)
+      .eq("id", data.id)
+      .select("id, user_id")
+      .single();
+    if (error) throw new Error(error.message);
+    if (!updated) throw new Error("User record was not found.");
+
+    return { id: updated.id, user_id: updated.user_id };
   });
 
 export const deleteUser = createServerFn({ method: "POST" })
