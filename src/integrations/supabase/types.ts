@@ -616,7 +616,7 @@ export type Database = {
         | "holiday"
         | "pending_verification"
         | "pending"
-      cadre_type: "PRP" | "FLCRP" | "RBK" | "IFC_Anchor" | "SR_CRP"
+      cadre_type: "PRP" | "FLCRP" | "RBK" | "IFC_Anchor" | "SR_CRP" | "FPO_CEO"
       leave_type: "casual" | "sick" | "earned" | "emergency" | "other"
     }
     CompositeTypes: {
@@ -781,7 +781,7 @@ export const Constants = {
         "pending_verification",
         "pending",
       ],
-      cadre_type: ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP"],
+      cadre_type: ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO"],
       leave_type: ["casual", "sick", "earned", "emergency", "other"],
     },
   },

@@ -1159,6 +1159,7 @@ function UsersPage() {
                     <SelectItem value="RBK">RBK</SelectItem>
                     <SelectItem value="IFC_Anchor">IFC Anchor</SelectItem>
                     <SelectItem value="SR_CRP">SR.CRP</SelectItem>
+                    <SelectItem value="FPO_CEO">FPO CEO</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
