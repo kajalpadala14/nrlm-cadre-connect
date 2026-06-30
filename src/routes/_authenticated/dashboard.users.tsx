@@ -85,6 +85,8 @@ const EMPTY_STAFF_FORM: StaffForm = {
   pin: "",
 };
 
+const USER_ID_PATTERN = /^[a-zA-Z0-9_.-]{2,40}$/;
+
 const getStaffSystemRole = (role: StaffFormRole): StaffSystemRole =>
   role === "admin" || role === "DPM" ? "admin" : "block_officer";
 
@@ -287,6 +289,10 @@ function UsersPage() {
       toast.error(t("toast_name_required"));
       return;
     }
+    if (editingCadre && !USER_ID_PATTERN.test(form.user_id.trim())) {
+      toast.error("User ID must be 2-40 characters: letters, digits, _ . - only.");
+      return;
+    }
     if (!editingCadre && !/^[0-9]{4}$/.test(form.pin)) {
       toast.error(t("toast_pin_digits"));
       return;
@@ -333,6 +339,7 @@ function UsersPage() {
         await updateUserProfile({
           data: {
             id: editingCadre.id,
+            user_id: form.user_id.trim(),
             full_name: form.name,
             phone: form.phone || null,
             role: "cadre",
@@ -451,6 +458,10 @@ function UsersPage() {
       toast.error("Full name is required.");
       return;
     }
+    if (editingStaff && !USER_ID_PATTERN.test(staffForm.user_id.trim())) {
+      toast.error("User ID must be 2-40 characters: letters, digits, _ . - only.");
+      return;
+    }
     if (!editingStaff && !/^[0-9]{4}$/.test(staffForm.pin)) {
       toast.error("PIN must be exactly 4 digits.");
       return;
@@ -482,6 +493,7 @@ function UsersPage() {
         await updateUserProfile({
           data: {
             id: editingStaff.id,
+            user_id: staffForm.user_id.trim(),
             full_name: staffForm.name,
             phone: staffForm.phone || null,
             role: staffSystemRole,
@@ -981,9 +993,10 @@ function UsersPage() {
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">User ID</Label>
                 <Input
-                  readOnly
-                  value={staffForm.user_id || "Not assigned"}
-                  className="h-10 rounded-lg border-slate-200 bg-slate-50 font-mono text-xs text-slate-500"
+                  value={staffForm.user_id}
+                  onChange={(e) => setStaffForm({ ...staffForm, user_id: e.target.value.trim() })}
+                  placeholder="e.g. saritakarma_292"
+                  className="h-10 rounded-lg border-slate-200 font-mono text-xs"
                 />
               </div>
             )}
@@ -1103,6 +1116,18 @@ function UsersPage() {
                   className="h-10 rounded-lg border-slate-200 text-xs"
                 />
               </div>
+
+              {editingCadre && (
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs font-bold text-slate-500">{t("user_id")}</Label>
+                  <Input
+                    value={form.user_id}
+                    onChange={(e) => setForm({ ...form, user_id: e.target.value.trim() })}
+                    placeholder="e.g. saritakarma_292"
+                    className="h-10 rounded-lg border-slate-200 font-mono text-xs"
+                  />
+                </div>
+              )}
 
               {/* Phone */}
               <div className="flex flex-col gap-1.5">

@@ -97,6 +97,7 @@ const createUserInput = z.object({
 
 const updateUserInput = z.object({
   id: z.string().uuid(),
+  user_id: userIdSchema.optional(),
   full_name: z.string().trim().min(1).max(120),
   phone: z.string().trim().max(20).optional().nullable(),
   role: z.enum(["admin", "block_officer", "cadre"]).optional(),
@@ -248,6 +249,13 @@ export const updateUserProfile = createServerFn({ method: "POST" })
     const targetRoleList = (targetRoles ?? []).map((r) => r.role);
     const targetIsCadre = targetRoleList.includes("cadre");
 
+    const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
+      .from("profiles")
+      .select("block_id, user_id")
+      .eq("id", data.id)
+      .single();
+    if (targetProfileError) throw new Error(targetProfileError.message);
+
     if (!isAdmin && isBlockOfficer) {
       if (!targetIsCadre) throw new Error("Forbidden: block officers can only edit cadre accounts");
 
@@ -258,13 +266,6 @@ export const updateUserProfile = createServerFn({ method: "POST" })
         .single();
       if (myProfileError) throw new Error(myProfileError.message);
 
-      const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
-        .from("profiles")
-        .select("block_id")
-        .eq("id", data.id)
-        .single();
-      if (targetProfileError) throw new Error(targetProfileError.message);
-
       if (!myProfile?.block_id || targetProfile?.block_id !== myProfile.block_id) {
         throw new Error("Forbidden: you can only edit cadres in your own block");
       }
@@ -273,7 +274,41 @@ export const updateUserProfile = createServerFn({ method: "POST" })
       }
     }
 
+    const nextUserId = data.user_id?.trim().toLowerCase();
+    if (nextUserId && nextUserId !== targetProfile.user_id.toLowerCase()) {
+      const { data: duplicateProfile, error: duplicateError } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .ilike("user_id", nextUserId)
+        .neq("id", data.id)
+        .maybeSingle();
+      if (duplicateError) throw new Error(duplicateError.message);
+      if (duplicateProfile) throw new Error("User ID already exists. Please choose another User ID.");
+
+      const targetEmail = emailFor(nextUserId);
+      const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+      const duplicateAuthUser = existingUsers?.users.find(
+        (u) => u.email?.toLowerCase() === targetEmail && u.id !== data.id,
+      );
+      if (duplicateAuthUser) throw new Error("User ID already exists. Please choose another User ID.");
+
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
+        email: targetEmail,
+        user_metadata: { user_id: nextUserId, full_name: data.full_name },
+      });
+      if (authError) throw new Error(authError.message);
+    } else {
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
+        user_metadata: { user_id: targetProfile.user_id, full_name: data.full_name },
+      });
+      if (authError) throw new Error(authError.message);
+    }
+
     const updates = {
+      user_id: nextUserId ?? targetProfile.user_id,
       full_name: data.full_name,
       phone: data.phone ?? null,
       cadre_type: targetIsCadre ? (data.cadre_type ?? null) : null,

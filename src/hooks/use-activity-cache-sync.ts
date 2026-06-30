@@ -49,6 +49,14 @@ const TABLES_TO_WATCH = [
   "user_roles",
 ];
 
+function makeChannelId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function invalidateConsistencyQueries(queryClient: QueryClient) {
   QUERY_PREFIXES.forEach((queryKey) => {
     queryClient.invalidateQueries({ queryKey });
@@ -63,7 +71,7 @@ export function useUniversalConsistencySync() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const channel = supabase.channel(`universal-consistency-sync-${crypto.randomUUID()}`);
+    const channel = supabase.channel(`universal-consistency-sync-${makeChannelId()}`);
     TABLES_TO_WATCH.forEach((table) => {
       channel.on(
         "postgres_changes",
