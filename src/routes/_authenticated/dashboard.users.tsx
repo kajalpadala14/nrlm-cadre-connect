@@ -22,11 +22,12 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
-import { useProfile, highestRole } from "@/hooks/use-auth";
+import { useProfile, highestRole, type CadreType } from "@/hooks/use-auth";
 import { getUserDataScope } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { createUser, deleteUser, resetUserPin, updateUserProfile } from "@/lib/admin.functions";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
+import { isBlockScopedStaffRole, type BlockScopedStaffRole } from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/dashboard/users")({
   component: UsersPage,
@@ -47,7 +48,7 @@ interface CadreForm {
   pin: string;
 }
 
-type StaffSystemRole = "block_officer" | "admin";
+type StaffSystemRole = "admin" | BlockScopedStaffRole;
 type StaffFormRole = StaffSystemRole | "BPM" | "DPM" | "AC";
 
 interface StaffForm {
@@ -55,7 +56,7 @@ interface StaffForm {
   user_id: string;
   name: string;
   role: StaffFormRole;
-  block_id: string; // required for block_officer, ignored for admin
+  block_id: string; // required for block-scoped staff, ignored for admin
   phone: string;
   pin: string;
 }
@@ -87,8 +88,10 @@ const EMPTY_STAFF_FORM: StaffForm = {
 
 const USER_ID_PATTERN = /^[a-zA-Z0-9_.-]{2,40}$/;
 
+const getErrorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 const getStaffSystemRole = (role: StaffFormRole): StaffSystemRole =>
-  role === "admin" || role === "DPM" ? "admin" : "block_officer";
+  role === "DPM" ? "admin" : role === "BPM" || role === "AC" ? "block_officer" : role;
 
 const getStaffRoleLabel = (role: StaffFormRole) =>
   role === "admin"
@@ -99,7 +102,11 @@ const getStaffRoleLabel = (role: StaffFormRole) =>
         ? "BPM (Block Programme Manager)"
         : role === "AC"
           ? "AC (Area Coordinator)"
-          : "Block Officer";
+          : role === "fnhw"
+            ? "FNHW"
+            : role === "si"
+              ? "SI"
+              : "Block Officer";
 
 function UsersPage() {
   const { t } = useT();
@@ -133,7 +140,7 @@ function UsersPage() {
     },
   });
 
-  // Fetch Block Officers and Admins for the Staff tab
+  // Fetch staff users for the Staff tab
   // NOTE: user_roles has no FK to profiles in the DB schema, so PostgREST
   // rejects the profiles!inner(...) join with a 400. We fetch both tables
   // separately and merge by user_id in JS — same pattern used by cadres-list.
@@ -145,11 +152,11 @@ function UsersPage() {
     queryKey: ["staff-list"],
     queryFn: async () => {
       if (!isAdmin) return [];
-      // Step 1: fetch all admin / block_officer rows from user_roles
+      // Step 1: fetch all staff rows from user_roles
       const { data: userRoles, error: rolesError } = await supabase
         .from("user_roles")
         .select("user_id, role")
-        .in("role", ["admin", "block_officer"]);
+        .in("role", ["admin", "block_officer", "fnhw", "si"]);
 
       if (rolesError) {
         console.error("[staff-list] user_roles fetch error:", rolesError);
@@ -191,14 +198,14 @@ function UsersPage() {
           };
         })
         .filter(Boolean) as Array<{
-          id: string;
-          user_id: string;
-          name: string;
-          role: StaffSystemRole;
-          block_id: string;
-          phone: string;
-          pin: string;
-        }>;
+        id: string;
+        user_id: string;
+        name: string;
+        role: StaffSystemRole;
+        block_id: string;
+        phone: string;
+        pin: string;
+      }>;
     },
   });
 
@@ -254,7 +261,12 @@ function UsersPage() {
     setEditingCadre(null);
     setForm({
       ...EMPTY_FORM,
-      block_id: scope.isScoped && scope.blockId ? scope.blockId : (blocks && blocks.length > 0 ? blocks[0].id : ""),
+      block_id:
+        scope.isScoped && scope.blockId
+          ? scope.blockId
+          : blocks && blocks.length > 0
+            ? blocks[0].id
+            : "",
     });
     setOpen(true);
   };
@@ -272,8 +284,8 @@ function UsersPage() {
         await deleteUser({ data: { id } });
         toast.success(t("toast_deleted"));
         refetch();
-      } catch (err: any) {
-        toast.error(`Error deleting user: ${err.message}`);
+      } catch (err: unknown) {
+        toast.error(`Error deleting user: ${getErrorMessage(err)}`);
       }
     }
   };
@@ -343,8 +355,8 @@ function UsersPage() {
             full_name: form.name,
             phone: form.phone || null,
             role: "cadre",
-            cadre_type: form.role as any,
-            block_id: scope.isScoped && scope.blockId ? scope.blockId : (form.block_id || null),
+            cadre_type: form.role as CadreType,
+            block_id: scope.isScoped && scope.blockId ? scope.blockId : form.block_id || null,
             village: village || null,
             panchayat: panchayat || null,
             gender: form.gender || null,
@@ -374,8 +386,8 @@ function UsersPage() {
             full_name: form.name,
             phone: form.phone || null,
             role: "cadre",
-            cadre_type: form.role as any,
-            block_id: scope.isScoped && scope.blockId ? scope.blockId : (form.block_id || null),
+            cadre_type: form.role as CadreType,
+            block_id: scope.isScoped && scope.blockId ? scope.blockId : form.block_id || null,
             village: village || null,
             panchayat: panchayat || null,
             gender: form.gender || null,
@@ -389,8 +401,8 @@ function UsersPage() {
       setOpen(false);
       setForm(EMPTY_FORM);
       refetch();
-    } catch (err: any) {
-      toast.error(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      toast.error(`Error: ${getErrorMessage(err)}`);
     } finally {
       cadreSaveInFlightRef.current = false;
       setIsCadreSaving(false);
@@ -400,15 +412,13 @@ function UsersPage() {
   const filteredCadres = cadres.filter(
     (c) =>
       (statusFilter === "all" || c.status === statusFilter) &&
-      (
-        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.user_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase()))
-      ),
+        (c.block_id && blockMap.get(c.block_id)?.toLowerCase().includes(searchTerm.toLowerCase()))),
   );
 
-  const activeCount   = cadres.filter((c) => c.status === "Active").length;
+  const activeCount = cadres.filter((c) => c.status === "Active").length;
   const inactiveCount = cadres.filter((c) => c.status === "Inactive").length;
 
   const filteredStaff = staffList.filter((s) => {
@@ -443,8 +453,8 @@ function UsersPage() {
         await deleteUser({ data: { id } });
         toast.success("Staff user deleted.");
         refetchStaff();
-      } catch (err: any) {
-        toast.error(`Error: ${err.message}`);
+      } catch (err: unknown) {
+        toast.error(`Error: ${getErrorMessage(err)}`);
       }
     }
   };
@@ -471,15 +481,19 @@ function UsersPage() {
       return;
     }
     const staffSystemRole = getStaffSystemRole(staffForm.role);
-    if (staffSystemRole === "block_officer" && !staffForm.block_id) {
-      toast.error("Block Officers must be assigned to a block.");
+    if (isBlockScopedStaffRole(staffSystemRole) && !staffForm.block_id) {
+      toast.error("Block-level staff must be assigned to a block.");
       return;
     }
 
     // Derive user_id before locking so rapid clicks share the same value
     const derivedStaffUserId = editingStaff
       ? null
-      : staffForm.name.trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20) +
+      : staffForm.name
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .slice(0, 20) +
         "_" +
         Math.floor(100 + Math.random() * 900);
 
@@ -497,7 +511,7 @@ function UsersPage() {
             full_name: staffForm.name,
             phone: staffForm.phone || null,
             role: staffSystemRole,
-            block_id: staffSystemRole === "block_officer" ? (staffForm.block_id || null) : null,
+            block_id: isBlockScopedStaffRole(staffSystemRole) ? staffForm.block_id || null : null,
           },
         });
 
@@ -518,18 +532,16 @@ function UsersPage() {
             phone: staffForm.phone || null,
             role: staffSystemRole,
             cadre_type: null,
-            block_id: staffSystemRole === "block_officer" ? (staffForm.block_id || null) : null,
+            block_id: isBlockScopedStaffRole(staffSystemRole) ? staffForm.block_id || null : null,
           },
         });
-        toast.success(
-          `${getStaffRoleLabel(staffForm.role)} created.`,
-        );
+        toast.success(`${getStaffRoleLabel(staffForm.role)} created.`);
       }
       setStaffOpen(false);
       setStaffForm(EMPTY_STAFF_FORM);
       refetchStaff();
-    } catch (err: any) {
-      toast.error(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      toast.error(`Error: ${getErrorMessage(err)}`);
     } finally {
       staffSaveInFlightRef.current = false;
       setIsStaffSaving(false);
@@ -542,7 +554,7 @@ function UsersPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight">
-          {t("cadre_mgmt_page_title")}
+            {t("cadre_mgmt_page_title")}
           </h2>
           <p className="text-xs text-slate-400 font-semibold uppercase mt-0.5">
             Create, update, and manage NRLM Field Cadres
@@ -566,15 +578,9 @@ function UsersPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">
-                    All ({cadres.length})
-                  </SelectItem>
-                  <SelectItem value="Active">
-                    ✅ Active ({activeCount})
-                  </SelectItem>
-                  <SelectItem value="Inactive">
-                    ❌ Inactive ({inactiveCount})
-                  </SelectItem>
+                  <SelectItem value="all">All ({cadres.length})</SelectItem>
+                  <SelectItem value="Active">✅ Active ({activeCount})</SelectItem>
+                  <SelectItem value="Inactive">❌ Inactive ({inactiveCount})</SelectItem>
                 </SelectContent>
               </Select>
               <Button
@@ -605,7 +611,6 @@ function UsersPage() {
           )}
         </div>
       </div>
-
       {/* Tab Switcher */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit text-xs font-bold">
         <button
@@ -631,212 +636,214 @@ function UsersPage() {
             )}
           >
             <Shield className="h-3.5 w-3.5" />
-            Staff (Block Officers &amp; Admins)
+            Staff (Block Staff &amp; Admins)
           </button>
         )}
       </div>
-
       {/* Cadre Table Grid — only shown when "cadres" tab is active */}
       {activeTab === "cadres" && (
-      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">        {/* Mobile Card Deck View */}
-        <div className="block md:hidden space-y-4">
-          {isLoading ? (
-            <div className="text-center py-8 text-slate-400 font-medium animate-pulse">
-              {t("loading_msg")}
-            </div>
-          ) : filteredCadres.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 font-medium">
-              {t("no_cadres_msg")}
-            </div>
-          ) : (
-            filteredCadres.map((c) => (
-              <div
-                key={c.id}
-                className="rounded-xl border border-slate-100 p-4 shadow-sm bg-slate-50/30 space-y-3"
-              >
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <div className="flex items-center gap-2">
-                    <div className="min-w-0">
-                      <span className="block truncate font-extrabold text-sm text-slate-800">
-                        {c.name}
-                      </span>
-                      <span className="block truncate font-mono text-[10px] font-bold uppercase text-slate-400">
-                        Cadre ID: {c.user_id || "—"}
-                      </span>
-                    </div>
-                    <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                      {c.role}
-                    </span>
-                  </div>
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-bold text-[10px]",
-                      c.status === "Active"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-rose-50 text-rose-700",
-                    )}
-                  >
-                    {c.status === "Active" ? "Active" : "Inactive"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
-                  <div className="flex flex-col">
-                    <span className="text-slate-400 text-[10px] uppercase">Gender</span>
-                    <span className="font-bold text-slate-700">{c.gender}</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-slate-400 text-[10px] uppercase">Block</span>
-                    <span className="font-bold text-slate-700">
-                      {blockMap.get(c.block_id) ?? c.block_id ?? "—"}
-                    </span>
-                  </div>
-                  <div className="flex flex-col pt-1">
-                    <span className="text-slate-400 text-[10px] uppercase">Panchayat</span>
-                    <span className="font-bold text-slate-700">{c.panchayat || "—"}</span>
-                  </div>
-                  <div className="flex flex-col pt-1">
-                    <span className="text-slate-400 text-[10px] uppercase">Village</span>
-                    <span className="font-bold text-slate-700">{c.village}</span>
-                  </div>
-                  <div className="flex flex-col pt-1 col-span-2">
-                    <span className="text-slate-400 text-[10px] uppercase">Phone / Mobile</span>
-                    <span className="font-bold font-mono text-slate-700">{c.phone}</span>
-                  </div>
-                  <div className="flex flex-col pt-1">
-                    <span className="text-slate-400 text-[10px] uppercase">Join Date</span>
-                    <span className="font-bold text-slate-700">{c.join_date}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleOpenEdit(c)}
-                    className="h-8 text-xs font-bold text-blue-600 border-blue-200 hover:bg-blue-50"
-                  >
-                    <Edit2 className="h-3.5 w-3.5 mr-1" /> Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDelete(c.id, c.name)}
-                    className="h-8 text-xs font-bold text-rose-600 border-rose-200 hover:bg-rose-50"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-                  </Button>
-                </div>
+        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+          {" "}
+          {/* Mobile Card Deck View */}
+          <div className="block md:hidden space-y-4">
+            {isLoading ? (
+              <div className="text-center py-8 text-slate-400 font-medium animate-pulse">
+                {t("loading_msg")}
               </div>
-            ))
-          )}
-        </div>
-
-        {/* Desktop Table View */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="min-w-full text-xs">
-            <thead>
-              <tr className="border-b border-slate-100 text-left text-slate-400 font-bold uppercase tracking-wider">
-                <th className="py-3 pr-3">{t("col_name")}</th>
-                <th className="py-3 pr-3">{t("col_cadre_id")}</th>
-                <th className="py-3 pr-3">{t("col_role")}</th>
-                <th className="py-3 pr-3">{t("col_gender")}</th>
-                <th className="py-3 pr-3">{t("col_block")}</th>
-                <th className="py-3 pr-3">{t("col_panchayat")}</th>
-                <th className="py-3 pr-3">{t("col_village")}</th>
-                <th className="py-3 pr-3">{t("col_phone")}</th>
-                <th className="py-3 pr-3">{t("col_join_date")}</th>
-                <th className="py-3 pr-3">{t("col_status")}</th>
-                <th className="py-3 text-center">{t("col_actions")}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {isLoading ? (
-                <tr>
-                  <td
-                    colSpan={11}
-                    className="py-8 text-center text-slate-400 font-medium animate-pulse"
-                  >
-                    {t("loading_msg")}
-                  </td>
-                </tr>
-              ) : filteredCadres.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="py-8 text-center text-slate-400 font-medium">
-                    {t("no_cadres_msg")}
-                  </td>
-                </tr>
-              ) : (
-                filteredCadres.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3.5 pr-3 font-bold text-slate-700">{c.name}</td>
-                    <td className="py-3.5 pr-3 font-mono text-slate-600 font-semibold">
-                      {c.user_id || "—"}
-                    </td>
-                    <td className="py-3.5 pr-3">
-                      <span className="rounded-md bg-blue-50 px-2 py-0.5 font-bold text-blue-700">
+            ) : filteredCadres.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 font-medium">
+                {t("no_cadres_msg")}
+              </div>
+            ) : (
+              filteredCadres.map((c) => (
+                <div
+                  key={c.id}
+                  className="rounded-xl border border-slate-100 p-4 shadow-sm bg-slate-50/30 space-y-3"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        <span className="block truncate font-extrabold text-sm text-slate-800">
+                          {c.name}
+                        </span>
+                        <span className="block truncate font-mono text-[10px] font-bold uppercase text-slate-400">
+                          Cadre ID: {c.user_id || "—"}
+                        </span>
+                      </div>
+                      <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
                         {c.role}
                       </span>
-                    </td>
-                    <td className="py-3.5 pr-3 text-slate-500 font-semibold">{c.gender}</td>
-                    <td className="py-3.5 pr-3 text-slate-600 font-semibold">
-                      {blockMap.get(c.block_id) ?? c.block_id ?? "—"}
-                    </td>
-                    <td className="py-3.5 pr-3 text-slate-500 font-semibold">
-                      {c.panchayat || "—"}
-                    </td>
-                    <td className="py-3.5 pr-3 text-slate-500 font-semibold">{c.village}</td>
-                    <td className="py-3.5 pr-3 font-mono text-slate-600 font-medium">{c.phone}</td>
-                    <td className="py-3.5 pr-3 text-slate-500 font-semibold">{c.join_date}</td>
-                    <td className="py-3.5 pr-3">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-bold text-[10px]",
-                          c.status === "Active"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-rose-50 text-rose-700",
-                        )}
-                      >
-                        {c.status === "Active" ? (
-                          <>
-                            <CheckCircle className="h-3 w-3" />
-                            {t("active_status")}
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="h-3 w-3" />
-                            {t("inactive_status")}
-                          </>
-                        )}
+                    </div>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-bold text-[10px]",
+                        c.status === "Active"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-rose-50 text-rose-700",
+                      )}
+                    >
+                      {c.status === "Active" ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
+                    <div className="flex flex-col">
+                      <span className="text-slate-400 text-[10px] uppercase">Gender</span>
+                      <span className="font-bold text-slate-700">{c.gender}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-slate-400 text-[10px] uppercase">Block</span>
+                      <span className="font-bold text-slate-700">
+                        {blockMap.get(c.block_id) ?? c.block_id ?? "—"}
                       </span>
-                    </td>
-                    <td className="py-3.5 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleOpenEdit(c)}
-                          className="h-8 w-8 text-blue-600 hover:bg-blue-50 hover:text-blue-700 rounded-lg p-0"
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDelete(c.id, c.name)}
-                          className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 rounded-lg p-0"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                    </div>
+                    <div className="flex flex-col pt-1">
+                      <span className="text-slate-400 text-[10px] uppercase">Panchayat</span>
+                      <span className="font-bold text-slate-700">{c.panchayat || "—"}</span>
+                    </div>
+                    <div className="flex flex-col pt-1">
+                      <span className="text-slate-400 text-[10px] uppercase">Village</span>
+                      <span className="font-bold text-slate-700">{c.village}</span>
+                    </div>
+                    <div className="flex flex-col pt-1 col-span-2">
+                      <span className="text-slate-400 text-[10px] uppercase">Phone / Mobile</span>
+                      <span className="font-bold font-mono text-slate-700">{c.phone}</span>
+                    </div>
+                    <div className="flex flex-col pt-1">
+                      <span className="text-slate-400 text-[10px] uppercase">Join Date</span>
+                      <span className="font-bold text-slate-700">{c.join_date}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenEdit(c)}
+                      className="h-8 text-xs font-bold text-blue-600 border-blue-200 hover:bg-blue-50"
+                    >
+                      <Edit2 className="h-3.5 w-3.5 mr-1" /> Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDelete(c.id, c.name)}
+                      className="h-8 text-xs font-bold text-rose-600 border-rose-200 hover:bg-rose-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-slate-400 font-bold uppercase tracking-wider">
+                  <th className="py-3 pr-3">{t("col_name")}</th>
+                  <th className="py-3 pr-3">{t("col_cadre_id")}</th>
+                  <th className="py-3 pr-3">{t("col_role")}</th>
+                  <th className="py-3 pr-3">{t("col_gender")}</th>
+                  <th className="py-3 pr-3">{t("col_block")}</th>
+                  <th className="py-3 pr-3">{t("col_panchayat")}</th>
+                  <th className="py-3 pr-3">{t("col_village")}</th>
+                  <th className="py-3 pr-3">{t("col_phone")}</th>
+                  <th className="py-3 pr-3">{t("col_join_date")}</th>
+                  <th className="py-3 pr-3">{t("col_status")}</th>
+                  <th className="py-3 text-center">{t("col_actions")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan={11}
+                      className="py-8 text-center text-slate-400 font-medium animate-pulse"
+                    >
+                      {t("loading_msg")}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : filteredCadres.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="py-8 text-center text-slate-400 font-medium">
+                      {t("no_cadres_msg")}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCadres.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-3.5 pr-3 font-bold text-slate-700">{c.name}</td>
+                      <td className="py-3.5 pr-3 font-mono text-slate-600 font-semibold">
+                        {c.user_id || "—"}
+                      </td>
+                      <td className="py-3.5 pr-3">
+                        <span className="rounded-md bg-blue-50 px-2 py-0.5 font-bold text-blue-700">
+                          {c.role}
+                        </span>
+                      </td>
+                      <td className="py-3.5 pr-3 text-slate-500 font-semibold">{c.gender}</td>
+                      <td className="py-3.5 pr-3 text-slate-600 font-semibold">
+                        {blockMap.get(c.block_id) ?? c.block_id ?? "—"}
+                      </td>
+                      <td className="py-3.5 pr-3 text-slate-500 font-semibold">
+                        {c.panchayat || "—"}
+                      </td>
+                      <td className="py-3.5 pr-3 text-slate-500 font-semibold">{c.village}</td>
+                      <td className="py-3.5 pr-3 font-mono text-slate-600 font-medium">
+                        {c.phone}
+                      </td>
+                      <td className="py-3.5 pr-3 text-slate-500 font-semibold">{c.join_date}</td>
+                      <td className="py-3.5 pr-3">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-bold text-[10px]",
+                            c.status === "Active"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-rose-50 text-rose-700",
+                          )}
+                        >
+                          {c.status === "Active" ? (
+                            <>
+                              <CheckCircle className="h-3 w-3" />
+                              {t("active_status")}
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-3 w-3" />
+                              {t("inactive_status")}
+                            </>
+                          )}
+                        </span>
+                      </td>
+                      <td className="py-3.5 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleOpenEdit(c)}
+                            className="h-8 w-8 text-blue-600 hover:bg-blue-50 hover:text-blue-700 rounded-lg p-0"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDelete(c.id, c.name)}
+                            className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 rounded-lg p-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-      )} {/* end activeTab === "cadres" */}
-
+      )}{" "}
+      {/* end activeTab === "cadres" */}
       {/* ── Staff Panel ── */}
       {activeTab === "staff" && (
         <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
@@ -862,7 +869,7 @@ function UsersPage() {
                 ) : filteredStaff.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400">
-                      No Block Officers or Admins found. Add one using the button above.
+                      No staff users found. Add one using the button above.
                     </td>
                   </tr>
                 ) : (
@@ -881,16 +888,16 @@ function UsersPage() {
                               : "bg-emerald-50 text-emerald-700",
                           )}
                         >
-                          {s.role === "admin" ? "District Admin" : "Block Officer"}
+                          {getStaffRoleLabel(s.role)}
                         </span>
                       </td>
                       <td className="py-3.5 pr-3 text-slate-600 font-semibold">
                         {s.role === "admin" ? (
                           <span className="text-slate-400 italic">District-wide</span>
                         ) : (
-                          blockMap.get(s.block_id) ?? (
+                          (blockMap.get(s.block_id) ?? (
                             <span className="text-amber-600 font-bold">⚠ No block assigned</span>
-                          )
+                          ))
                         )}
                       </td>
                       <td className="py-3.5 pr-3 font-mono text-slate-600">{s.phone || "—"}</td>
@@ -933,7 +940,10 @@ function UsersPage() {
               <div className="text-center py-8 text-slate-400">No staff users found.</div>
             ) : (
               filteredStaff.map((s) => (
-                <div key={s.id} className="rounded-xl border border-slate-100 p-4 shadow-sm bg-slate-50/30 space-y-2">
+                <div
+                  key={s.id}
+                  className="rounded-xl border border-slate-100 p-4 shadow-sm bg-slate-50/30 space-y-2"
+                >
                   <div className="flex items-center justify-between">
                     <div className="min-w-0">
                       <span className="block truncate font-extrabold text-sm text-slate-800">
@@ -943,23 +953,40 @@ function UsersPage() {
                         User ID: {s.user_id || "—"}
                       </span>
                     </div>
-                    <span className={cn(
-                      "shrink-0 rounded-md px-2 py-0.5 font-bold text-[10px]",
-                      s.role === "admin" ? "bg-purple-50 text-purple-700" : "bg-emerald-50 text-emerald-700",
-                    )}>
-                      {s.role === "admin" ? "District Admin" : "Block Officer"}
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-md px-2 py-0.5 font-bold text-[10px]",
+                        s.role === "admin"
+                          ? "bg-purple-50 text-purple-700"
+                          : "bg-emerald-50 text-emerald-700",
+                      )}
+                    >
+                      {getStaffRoleLabel(s.role)}
                     </span>
                   </div>
                   <div className="text-xs text-slate-600 font-semibold">
-                    Block: {s.role === "admin" ? "District-wide" : (blockMap.get(s.block_id) ?? "⚠ Unassigned")}
+                    Block:{" "}
+                    {s.role === "admin"
+                      ? "District-wide"
+                      : (blockMap.get(s.block_id) ?? "⚠ Unassigned")}
                   </div>
                   <div className="text-xs font-mono text-slate-500">{s.phone || "No phone"}</div>
                   {isAdmin && (
                     <div className="flex gap-2 pt-1">
-                      <Button size="sm" variant="outline" onClick={() => handleStaffOpenEdit(s)} className="h-8 text-xs text-blue-600 border-blue-200">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleStaffOpenEdit(s)}
+                        className="h-8 text-xs text-blue-600 border-blue-200"
+                      >
                         <Edit2 className="h-3.5 w-3.5 mr-1" /> Edit
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleStaffDelete(s.id, s.name)} className="h-8 text-xs text-rose-600 border-rose-200">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleStaffDelete(s.id, s.name)}
+                        className="h-8 text-xs text-rose-600 border-rose-200"
+                      >
                         <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
                       </Button>
                     </div>
@@ -969,17 +996,23 @@ function UsersPage() {
             )}
           </div>
         </div>
-      )} {/* end activeTab === "staff" */}
-
+      )}{" "}
+      {/* end activeTab === "staff" */}
       {/* ── Staff Add / Edit Dialog ── */}
-      <Dialog open={staffOpen} onOpenChange={(nextOpen) => !isStaffSaving && setStaffOpen(nextOpen)}>
+      <Dialog
+        open={staffOpen}
+        onOpenChange={(nextOpen) => !isStaffSaving && setStaffOpen(nextOpen)}
+      >
         <DialogContent className="max-w-md rounded-2xl p-6 shadow-xl border border-slate-100">
           <DialogHeader className="border-b border-slate-100 pb-3">
             <DialogTitle className="text-lg font-black text-slate-800">
               {editingStaff ? "Edit Staff User" : "Add Staff User"}
             </DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleStaffSave} className="space-y-4 pt-3 text-xs font-bold text-slate-700">
+          <form
+            onSubmit={handleStaffSave}
+            className="space-y-4 pt-3 text-xs font-bold text-slate-700"
+          >
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-bold text-slate-500">Full Name</Label>
               <Input
@@ -1006,7 +1039,9 @@ function UsersPage() {
                 maxLength={10}
                 inputMode="numeric"
                 value={staffForm.phone}
-                onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value.replace(/\D/g, "") })}
+                onChange={(e) =>
+                  setStaffForm({ ...staffForm, phone: e.target.value.replace(/\D/g, "") })
+                }
                 placeholder="e.g. 9876543210"
                 className="h-10 rounded-lg border-slate-200 text-xs"
               />
@@ -1024,6 +1059,8 @@ function UsersPage() {
                   <SelectContent>
                     <SelectItem value="block_officer">Block Officer (Block Coordinator)</SelectItem>
                     <SelectItem value="admin">Admin (District Admin)</SelectItem>
+                    <SelectItem value="fnhw">FNHW</SelectItem>
+                    <SelectItem value="si">SI</SelectItem>
                     <SelectItem value="BPM">BPM (Block Programme Manager)</SelectItem>
                     <SelectItem value="DPM">DPM(District Programme Manager)</SelectItem>
                     <SelectItem value="AC">AC (Area Coordinator)</SelectItem>
@@ -1031,7 +1068,7 @@ function UsersPage() {
                 </Select>
               </div>
             )}
-            {getStaffSystemRole(staffForm.role) === "block_officer" && (
+            {isBlockScopedStaffRole(getStaffSystemRole(staffForm.role)) && (
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">
                   Assigned Block <span className="text-rose-500">*</span>
@@ -1045,18 +1082,22 @@ function UsersPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {(blocks ?? []).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-slate-400 font-medium">
-                  Cadres in this block will see this person as their Block Coordinator on the Help page.
+                  Cadres in this block will see this person as their Block Coordinator on the Help
+                  page.
                 </p>
               </div>
             )}
             {getStaffSystemRole(staffForm.role) === "admin" && (
               <p className="text-[10px] text-slate-400 font-medium bg-purple-50 rounded-lg p-2.5 border border-purple-100">
-                Admins are District-level. All cadres will see this person as their District Admin on the Help page.
+                Admins are District-level. All cadres will see this person as their District Admin
+                on the Help page.
               </p>
             )}
             <div className="flex flex-col gap-1.5">
@@ -1067,7 +1108,9 @@ function UsersPage() {
                 maxLength={4}
                 inputMode="numeric"
                 value={staffForm.pin}
-                onChange={(e) => setStaffForm({ ...staffForm, pin: e.target.value.replace(/\D/g, "") })}
+                onChange={(e) =>
+                  setStaffForm({ ...staffForm, pin: e.target.value.replace(/\D/g, "") })
+                }
                 placeholder="••••"
                 className="h-10 rounded-lg border-slate-200 text-xs"
               />
@@ -1093,14 +1136,11 @@ function UsersPage() {
           </form>
         </DialogContent>
       </Dialog>
-
       <Dialog open={open} onOpenChange={(nextOpen) => !isCadreSaving && setOpen(nextOpen)}>
         <DialogContent className="max-w-xl rounded-2xl p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
           <DialogHeader className="border-b border-slate-100 pb-3">
             <DialogTitle className="text-lg font-black text-slate-800">
-              {editingCadre
-                ? t("edit_cadre_title")
-                : t("add_new_cadre_title")}
+              {editingCadre ? t("edit_cadre_title") : t("add_new_cadre_title")}
             </DialogTitle>
           </DialogHeader>
 
@@ -1160,6 +1200,7 @@ function UsersPage() {
                     <SelectItem value="IFC_Anchor">IFC Anchor</SelectItem>
                     <SelectItem value="SR_CRP">SR.CRP</SelectItem>
                     <SelectItem value="FPO_CEO">FPO CEO</SelectItem>
+                    <SelectItem value="Gender">Gender</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1201,7 +1242,9 @@ function UsersPage() {
                         </SelectItem>
                       ))}
                     {(blocks ?? []).length === 0 && (
-                      <SelectItem value="__none" disabled>No blocks available</SelectItem>
+                      <SelectItem value="__none" disabled>
+                        No blocks available
+                      </SelectItem>
                     )}
                   </SelectContent>
                 </Select>
@@ -1248,9 +1291,7 @@ function UsersPage() {
 
               {/* PIN */}
               <div className="flex flex-col gap-1.5">
-                <Label className="text-xs font-bold text-slate-500">
-                  {t("pin_field")}
-                </Label>
+                <Label className="text-xs font-bold text-slate-500">{t("pin_field")}</Label>
                 <Input
                   maxLength={4}
                   inputMode="numeric"

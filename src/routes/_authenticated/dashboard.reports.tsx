@@ -360,6 +360,7 @@ const ROLE_LABEL_MAP: Record<string, string> = {
   DPM:               "DPM (District Project Manager)",
   CEO:               "CEO",
   FPO_CEO:           "FPO CEO",
+  Gender:            "Gender",
 };
 
 // Fetches distinct cadre_type values that actually exist in profiles.

@@ -1,4 +1,5 @@
 import { supabase as browserClient } from "@/integrations/supabase/client";
+import { hasAdminRole, hasBlockScopedStaffRole } from "@/lib/roles";
 
 type SupabaseClient = typeof browserClient;
 
@@ -22,8 +23,8 @@ export async function requireStaffScope(
   if (profileError) throw profileError;
 
   const roleList = (roles ?? []).map((r) => r.role);
-  const isAdmin = roleList.includes("admin");
-  const isBlockOfficer = roleList.includes("block_officer");
+  const isAdmin = hasAdminRole(roleList);
+  const isBlockOfficer = hasBlockScopedStaffRole(roleList);
 
   if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: staff only");
 

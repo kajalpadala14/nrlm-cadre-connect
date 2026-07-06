@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
+import { hasAdminRole, hasBlockScopedStaffRole, type AppRole } from "@/lib/roles";
 import { z } from "zod";
 
 const userIdSchema = z
@@ -18,9 +19,9 @@ function passwordFor(pin: string) {
   return `NRLM-${pin}`;
 }
 
-type CreateUserRole = "admin" | "block_officer" | "cadre" | "BPM" | "DPM" | "AC";
+type CreateUserRole = AppRole | "BPM" | "DPM" | "AC";
 
-function normalizeCreateUserRole(role: CreateUserRole): "admin" | "block_officer" | "cadre" {
+function normalizeCreateUserRole(role: CreateUserRole): AppRole {
   if (role === "DPM") return "admin";
   if (role === "BPM" || role === "AC") return "block_officer";
   return role;
@@ -82,9 +83,9 @@ const createUserInput = z.object({
   pin: pinSchema,
   full_name: z.string().trim().min(1).max(120),
   phone: z.string().trim().max(20).optional().nullable(),
-  role: z.enum(["admin", "block_officer", "cadre", "BPM", "DPM", "AC"]),
+  role: z.enum(["admin", "block_officer", "fnhw", "si", "cadre", "BPM", "DPM", "AC"]),
   cadre_type: z
-    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO"])
+    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender"])
     .nullable()
     .optional(),
   block_id: z.string().uuid().nullable().optional(),
@@ -100,9 +101,9 @@ const updateUserInput = z.object({
   user_id: userIdSchema.optional(),
   full_name: z.string().trim().min(1).max(120),
   phone: z.string().trim().max(20).optional().nullable(),
-  role: z.enum(["admin", "block_officer", "cadre"]).optional(),
+  role: z.enum(["admin", "block_officer", "fnhw", "si", "cadre"]).optional(),
   cadre_type: z
-    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO"])
+    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender"])
     .nullable()
     .optional(),
   block_id: z.string().uuid().nullable().optional(),
@@ -118,14 +119,14 @@ export const createUser = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => createUserInput.parse(data))
   .handler(async ({ data, context }) => {
     // Admins can create any role.
-    // Block officers (BPM / block_officer) can create cadres in their own block only.
+    // Block-scoped staff can create cadres in their own block only.
     const { data: roles } = await context.supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId);
     const roleList = (roles ?? []).map((r) => r.role);
-    const isAdmin = roleList.some((r) => r === "admin");
-    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+    const isAdmin = hasAdminRole(roleList);
+    const isBlockOfficer = hasBlockScopedStaffRole(roleList);
 
     if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
 
@@ -143,7 +144,10 @@ export const createUser = createServerFn({ method: "POST" })
         .select("block_id")
         .eq("id", context.userId)
         .single();
-      if (myProfile?.block_id && data.block_id && data.block_id !== myProfile.block_id) {
+      if (!myProfile?.block_id) {
+        throw new Error("Forbidden: block-level staff must be assigned to a block");
+      }
+      if (data.block_id !== myProfile.block_id) {
         throw new Error("Forbidden: you can only add cadres to your own block");
       }
     }
@@ -162,30 +166,25 @@ export const createUser = createServerFn({ method: "POST" })
     const existingAuthUser = existingList?.users.find((u) => u.email === targetEmail);
     if (existingAuthUser) {
       // Already exists — verify profile + role rows are in place then return
-      await supabaseAdmin
-        .from("profiles")
-        .upsert(
-          {
-            id: existingAuthUser.id,
-            user_id: data.user_id,
-            full_name: data.full_name,
-            phone: data.phone ?? null,
-            cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
-            block_id: data.block_id ?? null,
-            village: systemRole === "cadre" ? (data.village ?? null) : null,
-            panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
-            gender: systemRole === "cadre" ? (data.gender ?? null) : null,
-            join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
-            status: systemRole === "cadre" ? (data.status ?? null) : null,
-          },
-          { onConflict: "id" },
-        );
+      await supabaseAdmin.from("profiles").upsert(
+        {
+          id: existingAuthUser.id,
+          user_id: data.user_id,
+          full_name: data.full_name,
+          phone: data.phone ?? null,
+          cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
+          block_id: data.block_id ?? null,
+          village: systemRole === "cadre" ? (data.village ?? null) : null,
+          panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
+          gender: systemRole === "cadre" ? (data.gender ?? null) : null,
+          join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
+          status: systemRole === "cadre" ? (data.status ?? null) : null,
+        },
+        { onConflict: "id" },
+      );
       await supabaseAdmin
         .from("user_roles")
-        .upsert(
-          { user_id: existingAuthUser.id, role: systemRole },
-          { onConflict: "user_id,role" },
-        );
+        .upsert({ user_id: existingAuthUser.id, role: systemRole }, { onConflict: "user_id,role" });
       return { id: existingAuthUser.id };
     }
     // ────────────────────────────────────────────────────────────────────
@@ -235,8 +234,8 @@ export const updateUserProfile = createServerFn({ method: "POST" })
       .select("role")
       .eq("user_id", context.userId);
     const roleList = (roles ?? []).map((r) => r.role);
-    const isAdmin = roleList.some((r) => r === "admin");
-    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+    const isAdmin = hasAdminRole(roleList);
+    const isBlockOfficer = hasBlockScopedStaffRole(roleList);
 
     if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
 
@@ -283,7 +282,8 @@ export const updateUserProfile = createServerFn({ method: "POST" })
         .neq("id", data.id)
         .maybeSingle();
       if (duplicateError) throw new Error(duplicateError.message);
-      if (duplicateProfile) throw new Error("User ID already exists. Please choose another User ID.");
+      if (duplicateProfile)
+        throw new Error("User ID already exists. Please choose another User ID.");
 
       const targetEmail = emailFor(nextUserId);
       const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers({
@@ -293,7 +293,8 @@ export const updateUserProfile = createServerFn({ method: "POST" })
       const duplicateAuthUser = existingUsers?.users.find(
         (u) => u.email?.toLowerCase() === targetEmail && u.id !== data.id,
       );
-      if (duplicateAuthUser) throw new Error("User ID already exists. Please choose another User ID.");
+      if (duplicateAuthUser)
+        throw new Error("User ID already exists. Please choose another User ID.");
 
       const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
         email: targetEmail,
@@ -341,8 +342,8 @@ export const deleteUser = createServerFn({ method: "POST" })
       .select("role")
       .eq("user_id", context.userId);
     const roleList = (roles ?? []).map((r) => r.role);
-    const isAdmin = roleList.some((r) => r === "admin");
-    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+    const isAdmin = hasAdminRole(roleList);
+    const isBlockOfficer = hasBlockScopedStaffRole(roleList);
 
     if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
     if (data.id === context.userId) throw new Error("Cannot delete yourself");
@@ -354,7 +355,16 @@ export const deleteUser = createServerFn({ method: "POST" })
         .select("role")
         .eq("user_id", data.id);
       const targetIsCadre = (targetRoles ?? []).some((r) => r.role === "cadre");
-      if (!targetIsCadre) throw new Error("Forbidden: block officers can only delete cadre accounts");
+      if (!targetIsCadre)
+        throw new Error("Forbidden: block officers can only delete cadre accounts");
+
+      const [{ data: myProfile }, { data: targetProfile }] = await Promise.all([
+        context.supabase.from("profiles").select("block_id").eq("id", context.userId).single(),
+        context.supabase.from("profiles").select("block_id").eq("id", data.id).single(),
+      ]);
+      if (!myProfile?.block_id || targetProfile?.block_id !== myProfile.block_id) {
+        throw new Error("Forbidden: you can only delete cadres in your own block");
+      }
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -374,8 +384,8 @@ export const resetUserPin = createServerFn({ method: "POST" })
       .select("role")
       .eq("user_id", context.userId);
     const roleList = (roles ?? []).map((r) => r.role);
-    const isAdmin = roleList.some((r) => r === "admin");
-    const isBlockOfficer = roleList.some((r) => r === "block_officer");
+    const isAdmin = hasAdminRole(roleList);
+    const isBlockOfficer = hasBlockScopedStaffRole(roleList);
 
     if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
 
@@ -387,6 +397,14 @@ export const resetUserPin = createServerFn({ method: "POST" })
         .eq("user_id", data.id);
       const targetIsCadre = (targetRoles ?? []).some((r) => r.role === "cadre");
       if (!targetIsCadre) throw new Error("Forbidden: block officers can only reset cadre PINs");
+
+      const [{ data: myProfile }, { data: targetProfile }] = await Promise.all([
+        context.supabase.from("profiles").select("block_id").eq("id", context.userId).single(),
+        context.supabase.from("profiles").select("block_id").eq("id", data.id).single(),
+      ]);
+      if (!myProfile?.block_id || targetProfile?.block_id !== myProfile.block_id) {
+        throw new Error("Forbidden: you can only reset PINs for cadres in your own block");
+      }
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

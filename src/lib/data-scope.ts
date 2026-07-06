@@ -1,6 +1,7 @@
 import { highestRole } from "@/hooks/use-auth";
 import type { ProfileWithRoles } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
+import { isBlockScopedStaffRole } from "@/lib/roles";
 
 export interface UserScope {
   /** true once the profile has finished loading */
@@ -13,9 +14,15 @@ export interface UserScope {
 
 /** UUID v4 regex — rejects "none", "", or any non-UUID string */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMPTY_BLOCK_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
 
 function isValidUUID(v: string | null | undefined): v is string {
   return !!v && UUID_RE.test(v);
+}
+
+interface ScopedQuery<TSelf> {
+  in(column: string, values: string[]): TSelf;
+  eq(column: string, value: string): TSelf;
 }
 
 export function getUserDataScope(user: ProfileWithRoles | null | undefined): UserScope {
@@ -25,14 +32,18 @@ export function getUserDataScope(user: ProfileWithRoles | null | undefined): Use
   }
 
   const role = highestRole(user.roles);
-  // block_officer role covers both Block Officers and BPM users in this system
-  const isScoped = role === "block_officer";
+  // Block-scoped staff roles share BPM/Block Officer data visibility.
+  const isScoped = isBlockScopedStaffRole(role);
 
   if (isScoped && isValidUUID(user.block_id)) {
     return { ready: true, isScoped: true, blockId: user.block_id };
   }
 
-  // Admin (or block officer with no block assigned yet)
+  if (isScoped) {
+    return { ready: true, isScoped: true, blockId: EMPTY_BLOCK_SCOPE_ID };
+  }
+
+  // Admin
   return { ready: true, isScoped: false, blockId: null };
 }
 
@@ -73,26 +84,29 @@ export async function getCadreIdsInBlock(blockId: string): Promise<string[]> {
  * - activities.block_id is often NULL (not filled at submit time)
  * - profiles.block_id IS reliably set (we use this to resolve cadreIds)
  */
-export function applyScopeToQuery(
-  query: any,
+export function applyScopeToQuery<TQuery extends ScopedQuery<TQuery>>(
+  query: TQuery,
   _tableHasBlockId: boolean, // kept for API compatibility, ignored
   blockId: string | null,
-  cadreIds: string[]
-) {
+  cadreIds: string[],
+): TQuery {
   if (!blockId || !isValidUUID(blockId)) return query;
 
   if (cadreIds.length > 0) {
     return query.in("cadre_id", cadreIds);
   }
   // Block has no cadres — force empty result (valid UUID, no match)
-  return query.eq("cadre_id", "00000000-0000-0000-0000-000000000000");
+  return query.eq("cadre_id", EMPTY_BLOCK_SCOPE_ID);
 }
 
 /**
  * Apply block scope to a query that uses block_id column directly.
  * Safe to use on the profiles table where block_id is reliably set.
  */
-export function applyScopeByBlockId(query: any, blockId: string | null) {
+export function applyScopeByBlockId<TQuery extends ScopedQuery<TQuery>>(
+  query: TQuery,
+  blockId: string | null,
+): TQuery {
   if (!blockId || !isValidUUID(blockId)) return query;
   return query.eq("block_id", blockId);
 }

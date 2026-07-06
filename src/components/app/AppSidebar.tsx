@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useProfile, highestRole, useSignOut } from "@/hooks/use-auth";
+import { isStaffRole } from "@/lib/roles";
 
 function NrlmLogo() {
   return (
@@ -90,7 +91,7 @@ export function AppSidebar() {
   const role = highestRole(profile?.roles ?? []);
   const signOut = useSignOut();
 
-  const isStaff = role === "admin" || role === "block_officer";
+  const isStaff = isStaffRole(role);
 
   // Direct home route for the logo link — avoids the /home dispatcher round-trip
   const homeRoute = isStaff ? "/dashboard" : "/cadre";

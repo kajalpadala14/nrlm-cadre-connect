@@ -1,7 +1,22 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HelpCircle, ChevronDown, Camera, WifiOff, MapPin, FileImage, ArrowLeft, Send, Phone, User, Download, Clock, AlertCircle } from "lucide-react";
+import {
+  HelpCircle,
+  ChevronDown,
+  Camera,
+  WifiOff,
+  MapPin,
+  FileImage,
+  ArrowLeft,
+  Send,
+  Phone,
+  User,
+  Download,
+  Clock,
+  AlertCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-auth";
 import { useT } from "@/lib/i18n";
@@ -23,11 +38,23 @@ export const Route = createFileRoute("/_authenticated/cadre/help")({
 
 interface FaqItem {
   id: string;
-  icon: any;
+  icon: LucideIcon;
   qEn: string;
   qHi: string;
   aEn: string;
   aHi: string;
+}
+
+type RoleWithProfile = {
+  profiles?: ContactInfo | ContactInfo[] | null;
+};
+
+const getErrorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+function firstProfile(row: RoleWithProfile): ContactInfo | null {
+  const profiles = row.profiles;
+  if (Array.isArray(profiles)) return profiles[0] ?? null;
+  return profiles ?? null;
 }
 
 const FAQS: FaqItem[] = [
@@ -84,13 +111,13 @@ function CadreHelpPage() {
       const { data, error } = await supabase
         .from("user_roles")
         .select("profiles!inner(full_name, phone)")
-        .eq("role", "block_officer")
+        .in("role", ["block_officer", "fnhw", "si"])
         .eq("profiles.block_id", profile.block_id)
         .limit(1)
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
-      const p = (data as any).profiles;
+      const p = firstProfile(data as RoleWithProfile);
       return p ? { full_name: p.full_name, phone: p.phone ?? null } : null;
     },
   });
@@ -110,7 +137,7 @@ function CadreHelpPage() {
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
-      const p = (data as any).profiles;
+      const p = firstProfile(data as RoleWithProfile);
       return p ? { full_name: p.full_name, phone: p.phone ?? null } : null;
     },
   });
@@ -176,8 +203,8 @@ function CadreHelpPage() {
       setSubject("");
       setDescription("");
       refetchTickets();
-    } catch (err: any) {
-      toast.error(`Error raising ticket: ${err.message}`);
+    } catch (err: unknown) {
+      toast.error(`Error raising ticket: ${getErrorMessage(err)}`);
     } finally {
       setSubmitting(false);
     }
@@ -229,8 +256,12 @@ function CadreHelpPage() {
                         <Icon className="h-4.5 w-4.5" />
                       </div>
                       <div>
-                        <h4 className="text-xs font-extrabold text-slate-800 leading-tight">{faq.qHi}</h4>
-                        <h5 className="text-[10px] font-semibold text-slate-400 mt-0.5 leading-none uppercase">{faq.qEn}</h5>
+                        <h4 className="text-xs font-extrabold text-slate-800 leading-tight">
+                          {faq.qHi}
+                        </h4>
+                        <h5 className="text-[10px] font-semibold text-slate-400 mt-0.5 leading-none uppercase">
+                          {faq.qEn}
+                        </h5>
                       </div>
                     </div>
                     <ChevronDown
@@ -274,14 +305,18 @@ function CadreHelpPage() {
                   <Download className="h-4 w-4 text-slate-400" />
                   NRLM Cadre Operating Guide.pdf
                 </span>
-                <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 font-black uppercase">Coming Soon</span>
+                <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 font-black uppercase">
+                  Coming Soon
+                </span>
               </div>
               <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl opacity-60 cursor-not-allowed">
                 <span className="flex items-center gap-1.5 text-slate-500">
                   <Download className="h-4 w-4 text-slate-400" />
                   GPS Validation FAQ Manual.pdf
                 </span>
-                <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 font-black uppercase">Coming Soon</span>
+                <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 font-black uppercase">
+                  Coming Soon
+                </span>
               </div>
             </div>
           </div>
@@ -290,7 +325,10 @@ function CadreHelpPage() {
         {/* Right Col: Raise Ticket Form & Raised Tickets list */}
         <div className="space-y-6">
           {/* Form */}
-          <div id="raise-ticket-form" className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm space-y-4 text-xs font-bold text-slate-700">
+          <div
+            id="raise-ticket-form"
+            className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm space-y-4 text-xs font-bold text-slate-700"
+          >
             <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider border-b border-slate-50 pb-2">
               {t("raise_ticket")}
             </h3>
@@ -306,7 +344,9 @@ function CadreHelpPage() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label className="text-[10px] text-slate-400 uppercase">{t("desc_label_help")}</Label>
+                <Label className="text-[10px] text-slate-400 uppercase">
+                  {t("desc_label_help")}
+                </Label>
                 <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -384,7 +424,10 @@ function CadreHelpPage() {
                   {blockCoordinator.phone ? (
                     <p className="text-slate-500 flex items-center gap-1">
                       <Phone className="h-3.5 w-3.5" />
-                      <a href={`tel:${blockCoordinator.phone}`} className="hover:text-blue-600 transition-colors">
+                      <a
+                        href={`tel:${blockCoordinator.phone}`}
+                        className="hover:text-blue-600 transition-colors"
+                      >
                         {blockCoordinator.phone}
                       </a>
                     </p>
@@ -416,7 +459,10 @@ function CadreHelpPage() {
                   {districtAdmin.phone ? (
                     <p className="text-slate-500 flex items-center gap-1">
                       <Phone className="h-3.5 w-3.5" />
-                      <a href={`tel:${districtAdmin.phone}`} className="hover:text-blue-600 transition-colors">
+                      <a
+                        href={`tel:${districtAdmin.phone}`}
+                        className="hover:text-blue-600 transition-colors"
+                      >
                         {districtAdmin.phone}
                       </a>
                     </p>

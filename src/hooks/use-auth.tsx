@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { isBlockScopedStaffRole } from "@/lib/roles";
 
 export type AppRole = Database["public"]["Enums"]["app_role"];
 export type CadreType = Database["public"]["Enums"]["cadre_type"];
@@ -125,6 +126,8 @@ export function useSignOut() {
 export function highestRole(roles: AppRole[]): AppRole | null {
   if (roles.includes("admin")) return "admin";
   if (roles.includes("block_officer")) return "block_officer";
+  const blockScopedRole = roles.find(isBlockScopedStaffRole);
+  if (blockScopedRole) return blockScopedRole;
   if (roles.includes("cadre")) return "cadre";
   return null;
 }

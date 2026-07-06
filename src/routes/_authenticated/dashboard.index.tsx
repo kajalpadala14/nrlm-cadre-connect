@@ -389,6 +389,7 @@ function Overview() {
           RBK: "bg-orange-100 text-orange-800",
           IFC_Anchor: "bg-purple-100 text-purple-800",
           SR_CRP: "bg-rose-100 text-rose-800",
+          Gender: "bg-cyan-100 text-cyan-800",
         };
         const bg = bgClassMap[cadreRole] || "bg-slate-100 text-slate-800";
 

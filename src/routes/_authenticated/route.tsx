@@ -6,8 +6,9 @@ import { useT } from "@/lib/i18n";
 import { User, Languages } from "lucide-react";
 import { useProfile, highestRole } from "@/hooks/use-auth";
 import { useUniversalConsistencySync } from "@/hooks/use-activity-cache-sync";
+import { hasStaffRole } from "@/lib/roles";
 
-// Routes under /dashboard/* require admin or block_officer.
+// Routes under /dashboard/* require staff roles.
 // Routes under /cadre/* require cadre role.
 // Any authenticated user reaching a mismatched section is redirected.
 // Users with no recognized role are redirected to /auth.
@@ -38,7 +39,7 @@ export const Route = createFileRoute("/_authenticated")({
     }
 
     const roles = (roleRows ?? []).map((r) => r.role as string);
-    const isStaff = roles.includes("admin") || roles.includes("block_officer");
+    const isStaff = hasStaffRole(roles);
     const isCadre = roles.includes("cadre");
 
     // A user with no recognized role has no valid section — send to auth.

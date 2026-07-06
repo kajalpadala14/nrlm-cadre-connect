@@ -51,7 +51,7 @@ const LEAVE_TYPES = [
   { value: "Emergency", labelEn: "Emergency Leave", labelHi: "आपातकालीन अवकाश" },
 ];
 
-const CADRE_TYPES = ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO"];
+const CADRE_TYPES = ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender"];
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; icon: React.ReactNode }> = {
   pending: {

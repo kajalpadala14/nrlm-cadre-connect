@@ -10,6 +10,7 @@ import { signInWithIdPin, useSession } from "@/hooks/use-auth";
 import { ensureAdminSeeded } from "@/lib/admin.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { Languages } from "lucide-react";
+import { hasStaffRole } from "@/lib/roles";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -65,14 +66,16 @@ function AuthPage() {
       // directly to the correct section — no intermediate /home dispatcher hop.
       let destination = "/home"; // fallback
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (user) {
           const { data: roleRows } = await supabase
             .from("user_roles")
             .select("role")
             .eq("user_id", user.id);
           const roles = (roleRows ?? []).map((r) => r.role as string);
-          if (roles.includes("admin") || roles.includes("block_officer")) {
+          if (hasStaffRole(roles)) {
             destination = "/dashboard";
           } else if (roles.includes("cadre")) {
             destination = "/cadre";

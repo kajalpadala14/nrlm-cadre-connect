@@ -95,6 +95,8 @@ const dict = {
   // Roles
   "role.admin": { en: "Admin", hi: "प्रशासक" },
   "role.block_officer": { en: "Block Officer", hi: "ब्लॉक अधिकारी" },
+  "role.fnhw": { en: "FNHW", hi: "FNHW" },
+  "role.si": { en: "SI", hi: "SI" },
   "role.cadre": { en: "Cadre", hi: "कैडर" },
 
   // Cadre types
@@ -104,6 +106,7 @@ const dict = {
   "ct.IFC_Anchor": { en: "IFC Anchor", hi: "आईएफसी एंकर" },
   "ct.SR_CRP": { en: "SR.CRP", hi: "एसआर सीआरपी" },
   "ct.FPO_CEO": { en: "FPO CEO", hi: "एफपीओ सीईओ" },
+  "ct.Gender": { en: "Gender", hi: "Gender" },
 
   // Admin dashboard KPIs
   total_cadres: { en: "Total Cadres", hi: "कुल कैडर" },
