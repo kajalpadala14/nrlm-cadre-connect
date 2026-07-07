@@ -361,6 +361,8 @@ const ROLE_LABEL_MAP: Record<string, string> = {
   CEO: "CEO",
   FPO_CEO: "FPO CEO",
   Gender: "Gender",
+  FNHW: "FNHW",
+  SI: "SI",
 };
 
 // Fetches distinct cadre_type values that actually exist in profiles.

@@ -1205,6 +1205,8 @@ function UsersPage() {
                     <SelectItem value="SR_CRP">SR.CRP</SelectItem>
                     <SelectItem value="FPO_CEO">FPO CEO</SelectItem>
                     <SelectItem value="Gender">Gender</SelectItem>
+                    <SelectItem value="FNHW">FNHW</SelectItem>
+                    <SelectItem value="SI">SI</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

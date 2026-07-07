@@ -107,6 +107,8 @@ const dict = {
   "ct.SR_CRP": { en: "SR.CRP", hi: "एसआर सीआरपी" },
   "ct.FPO_CEO": { en: "FPO CEO", hi: "एफपीओ सीईओ" },
   "ct.Gender": { en: "Gender", hi: "Gender" },
+  "ct.FNHW": { en: "FNHW", hi: "FNHW" },
+  "ct.SI": { en: "SI", hi: "SI" },
 
   // Admin dashboard KPIs
   total_cadres: { en: "Total Cadres", hi: "कुल कैडर" },

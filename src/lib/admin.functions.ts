@@ -85,7 +85,7 @@ const createUserInput = z.object({
   phone: z.string().trim().max(20).optional().nullable(),
   role: z.enum(["admin", "block_officer", "fnhw", "si", "cadre", "BPM", "DPM", "AC"]),
   cadre_type: z
-    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender"])
+    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender", "FNHW", "SI"])
     .nullable()
     .optional(),
   block_id: z.string().uuid().nullable().optional(),
@@ -103,7 +103,7 @@ const updateUserInput = z.object({
   phone: z.string().trim().max(20).optional().nullable(),
   role: z.enum(["admin", "block_officer", "fnhw", "si", "cadre"]).optional(),
   cadre_type: z
-    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender"])
+    .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender", "FNHW", "SI"])
     .nullable()
     .optional(),
   block_id: z.string().uuid().nullable().optional(),
