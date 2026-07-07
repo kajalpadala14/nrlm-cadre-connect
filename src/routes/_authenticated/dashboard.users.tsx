@@ -1344,5 +1344,3 @@ function UsersPage() {
     </div>
   );
 }
-  );
-}
