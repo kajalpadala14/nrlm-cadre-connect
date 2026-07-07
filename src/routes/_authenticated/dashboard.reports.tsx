@@ -207,19 +207,19 @@ function ReportsPage() {
     : (officerBlock ?? (blockFilter === "all" ? null : blockFilter));
 
   const tabs: { id: ReportTab; label: string }[] = [
-    { id: "attendance",        label: t("tab_attendance_label") },
-    { id: "activity",          label: t("tab_activity_label") },
+    { id: "attendance", label: t("tab_attendance_label") },
+    { id: "activity", label: t("tab_activity_label") },
     { id: "cadre_performance", label: t("tab_cadre_perf_label") },
     { id: "block_performance", label: t("tab_block_perf_label") },
-    { id: "leaves",            label: lang === "hi" ? "अवकाश रिपोर्ट" : "Leave Reports" },
+    { id: "leaves", label: lang === "hi" ? "अवकाश रिपोर्ट" : "Leave Reports" },
   ];
 
   const PRESETS: { id: Preset; label: string }[] = [
-    { id: "today",      label: t("preset_today_label") },
-    { id: "this_week",  label: t("preset_week_label") },
+    { id: "today", label: t("preset_today_label") },
+    { id: "this_week", label: t("preset_week_label") },
     { id: "this_month", label: t("preset_month_label") },
     { id: "last_month", label: t("preset_last_month_label") },
-    { id: "custom",     label: t("preset_custom_label") },
+    { id: "custom", label: t("preset_custom_label") },
   ];
 
   return (
@@ -349,18 +349,18 @@ function ReportsPage() {
 // Full label map for every possible role value the UI requested.
 // Roles not present in the DB will be hidden automatically.
 const ROLE_LABEL_MAP: Record<string, string> = {
-  PRP:               "PRP",
-  FLCRP:             "FLCRP",
-  RBK:               "RBK",
-  IFC_Anchor:        "IFC Anchor",
-  SR_CRP:            "SR CRP",
+  PRP: "PRP",
+  FLCRP: "FLCRP",
+  RBK: "RBK",
+  IFC_Anchor: "IFC Anchor",
+  SR_CRP: "SR CRP",
   Block_Coordinator: "Block Coordinator",
-  BPM:               "BPM (Block Project Manager)",
-  BPO:               "BPO (Block Programme Officer)",
-  DPM:               "DPM (District Project Manager)",
-  CEO:               "CEO",
-  FPO_CEO:           "FPO CEO",
-  Gender:            "Gender",
+  BPM: "BPM (Block Project Manager)",
+  BPO: "BPO (Block Programme Officer)",
+  DPM: "DPM (District Project Manager)",
+  CEO: "CEO",
+  FPO_CEO: "FPO CEO",
+  Gender: "Gender",
 };
 
 // Fetches distinct cadre_type values that actually exist in profiles.
@@ -449,12 +449,12 @@ function AttendanceReport({ from, to, blockId, selfCadreId }: { from: string; to
   });
 
   const STATUS_MAP: Record<string, string> = {
-    present:              "Present",
-    late:                 "Late",
-    absent:               "Absent",
-    on_leave:             "On Leave",
-    holiday:              "Holiday",
-    pending:              "Pending",
+    present: "Present",
+    late: "Late",
+    absent: "Absent",
+    on_leave: "On Leave",
+    holiday: "Holiday",
+    pending: "Pending",
     pending_verification: "Pending",
   };
 
@@ -489,10 +489,10 @@ function AttendanceReport({ from, to, blockId, selfCadreId }: { from: string; to
   // the status/role/search filters above) so the footer always shows the complete
   // breakdown for the selected date range, not just the currently visible subset.
   const presentTotal = raw.filter((r: any) => r.status === "present").length;
-  const lateTotal    = raw.filter((r: any) => r.status === "late").length;
-  const absentTotal  = raw.filter((r: any) => r.status === "absent").length;
+  const lateTotal = raw.filter((r: any) => r.status === "late").length;
+  const absentTotal = raw.filter((r: any) => r.status === "absent").length;
   const pendingTotal = raw.filter((r: any) => r.status === "pending" || r.status === "pending_verification").length;
-  const leaveTotal   = raw.filter((r: any) => r.status === "on_leave").length;
+  const leaveTotal = raw.filter((r: any) => r.status === "on_leave").length;
   const summaryFooter = raw.length > 0
     ? `Total records in range — Present: ${presentTotal} | Late: ${lateTotal} | Absent: ${absentTotal} | Pending: ${pendingTotal} | On Leave: ${leaveTotal}`
     : undefined;
@@ -777,11 +777,11 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
         const att = attData.filter((a: any) => a.cadre_id === p.id);
         const acts = actData.filter((a: any) => a.cadre_id === p.id);
         const present = att.filter((a: any) => a.status === "present").length;
-        const late    = att.filter((a: any) => a.status === "late").length;
-        const absent  = att.filter((a: any) => a.status === "absent").length;
-        const leave   = att.filter((a: any) => a.status === "on_leave").length;
-        const total   = present + late + absent + leave;
-        const attPct  = total > 0 ? (((present + late) / total) * 100).toFixed(1) + "%" : "—";
+        const late = att.filter((a: any) => a.status === "late").length;
+        const absent = att.filter((a: any) => a.status === "absent").length;
+        const leave = att.filter((a: any) => a.status === "on_leave").length;
+        const total = present + late + absent + leave;
+        const attPct = total > 0 ? (((present + late) / total) * 100).toFixed(1) + "%" : "—";
         const totalActs = acts.length;
         const approved = acts.filter((a: any) => a.status === "Approved").length;
         const pending = acts.filter((a: any) => a.status === "Pending").length;
@@ -929,9 +929,9 @@ function BlockPerformanceReport({ from, to, blockId }: { from: string; to: strin
       const bAct = actData.filter((a: any) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id);
 
       const present = bAtt.filter((a: any) => a.status === "present").length;
-      const late    = bAtt.filter((a: any) => a.status === "late").length;
-      const absent  = bAtt.filter((a: any) => a.status === "absent").length;
-      const total   = present + late + absent;
+      const late = bAtt.filter((a: any) => a.status === "late").length;
+      const absent = bAtt.filter((a: any) => a.status === "absent").length;
+      const total = present + late + absent;
       const avgAttPct = total > 0 ? (((present + late) / total) * 100).toFixed(1) + "%" : "—";
 
       const totalActs = bAct.length;

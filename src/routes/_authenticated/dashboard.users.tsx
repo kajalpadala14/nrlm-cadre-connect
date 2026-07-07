@@ -27,7 +27,7 @@ import { getUserDataScope } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { createUser, deleteUser, resetUserPin, updateUserProfile } from "@/lib/admin.functions";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
-import { isBlockScopedStaffRole, isFieldOfficerRole, type BlockScopedStaffRole, type FieldOfficerRole } from "@/lib/roles";
+import { isBlockScopedStaffRole, type BlockScopedStaffRole } from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/dashboard/users")({
   component: UsersPage,
@@ -48,8 +48,7 @@ interface CadreForm {
   pin: string;
 }
 
-// Field officers (fnhw, si) are managed here even though they use the cadre view
-type StaffSystemRole = "admin" | BlockScopedStaffRole | FieldOfficerRole;
+type StaffSystemRole = "admin" | BlockScopedStaffRole;
 type StaffFormRole = StaffSystemRole | "BPM" | "DPM" | "AC";
 
 interface StaffForm {
@@ -199,14 +198,14 @@ function UsersPage() {
           };
         })
         .filter(Boolean) as Array<{
-        id: string;
-        user_id: string;
-        name: string;
-        role: StaffSystemRole;
-        block_id: string;
-        phone: string;
-        pin: string;
-      }>;
+          id: string;
+          user_id: string;
+          name: string;
+          role: StaffSystemRole;
+          block_id: string;
+          phone: string;
+          pin: string;
+        }>;
     },
   });
 
@@ -332,12 +331,12 @@ function UsersPage() {
     const derivedUserId = editingCadre
       ? null
       : form.name
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "")
-          .slice(0, 20) +
-        "_" +
-        Math.floor(100 + Math.random() * 900);
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 20) +
+      "_" +
+      Math.floor(100 + Math.random() * 900);
 
     // Set BOTH the ref (synchronous, stops re-entrant calls instantly) and
     // the state (triggers button disabled re-render).
@@ -482,9 +481,7 @@ function UsersPage() {
       return;
     }
     const staffSystemRole = getStaffSystemRole(staffForm.role);
-    // fnhw/si are block-assigned field officers — they also need a block
-    const isBlockAssigned = isBlockScopedStaffRole(staffSystemRole) || isFieldOfficerRole(staffSystemRole);
-    if (isBlockAssigned && !staffForm.block_id) {
+    if (isBlockScopedStaffRole(staffSystemRole) && !staffForm.block_id) {
       toast.error("Block-level staff must be assigned to a block.");
       return;
     }
@@ -493,12 +490,12 @@ function UsersPage() {
     const derivedStaffUserId = editingStaff
       ? null
       : staffForm.name
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "")
-          .slice(0, 20) +
-        "_" +
-        Math.floor(100 + Math.random() * 900);
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 20) +
+      "_" +
+      Math.floor(100 + Math.random() * 900);
 
     staffSaveInFlightRef.current = true;
     setIsStaffSaving(true);
@@ -514,7 +511,7 @@ function UsersPage() {
             full_name: staffForm.name,
             phone: staffForm.phone || null,
             role: staffSystemRole,
-            block_id: isBlockAssigned ? staffForm.block_id || null : null,
+            block_id: isBlockScopedStaffRole(staffSystemRole) ? staffForm.block_id || null : null,
           },
         });
 
@@ -535,7 +532,7 @@ function UsersPage() {
             phone: staffForm.phone || null,
             role: staffSystemRole,
             cadre_type: null,
-            block_id: isBlockAssigned ? staffForm.block_id || null : null,
+            block_id: isBlockScopedStaffRole(staffSystemRole) ? staffForm.block_id || null : null,
           },
         });
         toast.success(`${getStaffRoleLabel(staffForm.role)} created.`);
@@ -1071,8 +1068,7 @@ function UsersPage() {
                 </Select>
               </div>
             )}
-            {(isBlockScopedStaffRole(getStaffSystemRole(staffForm.role)) ||
-              isFieldOfficerRole(getStaffSystemRole(staffForm.role))) && (
+            {isBlockScopedStaffRole(getStaffSystemRole(staffForm.role)) && (
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">
                   Assigned Block <span className="text-rose-500">*</span>
@@ -1346,5 +1342,7 @@ function UsersPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
   );
 }

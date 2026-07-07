@@ -610,7 +610,7 @@ export type Database = {
         | "holiday"
         | "pending_verification"
         | "pending";
-      cadre_type: "PRP" | "FLCRP" | "RBK" | "IFC_Anchor" | "SR_CRP" | "FPO_CEO" | "Gender";
+      cadre_type: "PRP" | "FLCRP" | "RBK" | "IFC_Anchor" | "SR_CRP" | "FPO_CEO" | "Gender" | "FNHW" | "SI";
       leave_type: "casual" | "sick" | "earned" | "emergency" | "other";
     };
     CompositeTypes: {
@@ -775,7 +775,7 @@ export const Constants = {
         "pending_verification",
         "pending",
       ],
-      cadre_type: ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender"],
+      cadre_type: ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender", "FNHW", "SI"],
       leave_type: ["casual", "sick", "earned", "emergency", "other"],
     },
   },

@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { isBlockScopedStaffRole, isFieldOfficerRole } from "@/lib/roles";
+import { isBlockScopedStaffRole } from "@/lib/roles";
 
 export type AppRole = Database["public"]["Enums"]["app_role"];
 export type CadreType = Database["public"]["Enums"]["cadre_type"];
@@ -129,8 +129,5 @@ export function highestRole(roles: AppRole[]): AppRole | null {
   const blockScopedRole = roles.find(isBlockScopedStaffRole);
   if (blockScopedRole) return blockScopedRole;
   if (roles.includes("cadre")) return "cadre";
-  // Field officers (fnhw, si) are not staff — they use the cadre view
-  const fieldOfficerRole = roles.find(isFieldOfficerRole);
-  if (fieldOfficerRole) return fieldOfficerRole;
   return null;
 }

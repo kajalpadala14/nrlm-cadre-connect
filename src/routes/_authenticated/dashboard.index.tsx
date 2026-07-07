@@ -390,6 +390,8 @@ function Overview() {
           IFC_Anchor: "bg-purple-100 text-purple-800",
           SR_CRP: "bg-rose-100 text-rose-800",
           Gender: "bg-cyan-100 text-cyan-800",
+          FNHW: "bg-teal-100 text-teal-800",
+          SI: "bg-indigo-100 text-indigo-800",
         };
         const bg = bgClassMap[cadreRole] || "bg-slate-100 text-slate-800";
 

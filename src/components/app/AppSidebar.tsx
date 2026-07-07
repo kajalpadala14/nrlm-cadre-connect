@@ -39,7 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useProfile, highestRole, useSignOut } from "@/hooks/use-auth";
-import { isStaffRole, isFieldOfficerRole } from "@/lib/roles";
+import { isStaffRole } from "@/lib/roles";
 
 function NrlmLogo() {
   return (
@@ -91,8 +91,7 @@ export function AppSidebar() {
   const role = highestRole(profile?.roles ?? []);
   const signOut = useSignOut();
 
-  // Field officers (fnhw, si) use the cadre/field-officer view despite having a non-cadre DB role
-  const isStaff = isStaffRole(role) && !isFieldOfficerRole(role);
+  const isStaff = isStaffRole(role);
 
   // Direct home route for the logo link — avoids the /home dispatcher round-trip
   const homeRoute = isStaff ? "/dashboard" : "/cadre";
