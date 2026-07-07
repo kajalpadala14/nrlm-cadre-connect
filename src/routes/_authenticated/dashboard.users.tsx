@@ -156,7 +156,7 @@ function UsersPage() {
       const { data: userRoles, error: rolesError } = await supabase
         .from("user_roles")
         .select("user_id, role")
-        .in("role", ["admin", "block_officer", "fnhw", "si"]);
+        .in("role", ["admin", "block_officer"]);
 
       if (rolesError) {
         console.error("[staff-list] user_roles fetch error:", rolesError);
@@ -218,8 +218,8 @@ function UsersPage() {
     queryFn: async () => {
       const { data: userRoles, error: urError } = await supabase
         .from("user_roles")
-        .select("user_id")
-        .eq("role", "cadre");
+        .select("user_id, role")
+        .in("role", ["cadre", "fnhw", "si"]);
       if (urError) throw urError;
 
       const cadreIds = userRoles.map((ur) => ur.user_id);
@@ -237,20 +237,26 @@ function UsersPage() {
       const { data: profiles, error: pError } = await profilesQuery;
       if (pError) throw pError;
 
-      return (profiles ?? []).map((p) => ({
-        id: p.id,
-        user_id: p.user_id || "",
-        name: p.full_name,
-        role: p.cadre_type || "PRP",
-        gender: p.gender || "Female",
-        block_id: p.block_id || "",
-        panchayat: p.panchayat || "",
-        village: p.village || "",
-        phone: p.phone || "",
-        join_date: p.join_date || new Date().toISOString().slice(0, 10),
-        status: (p.status as "Active" | "Inactive") || "Active",
-        pin: "••••",
-      }));
+      const roleMap = new Map(userRoles.map((ur) => [ur.user_id, ur.role]));
+
+      return (profiles ?? []).map((p) => {
+        const dbRole = roleMap.get(p.id);
+        const displayRole = dbRole === "fnhw" ? "FNHW" : dbRole === "si" ? "SI" : p.cadre_type || "PRP";
+        return {
+          id: p.id,
+          user_id: p.user_id || "",
+          name: p.full_name,
+          role: displayRole,
+          gender: p.gender || "Female",
+          block_id: p.block_id || "",
+          panchayat: p.panchayat || "",
+          village: p.village || "",
+          phone: p.phone || "",
+          join_date: p.join_date || new Date().toISOString().slice(0, 10),
+          status: (p.status as "Active" | "Inactive") || "Active",
+          pin: "••••",
+        };
+      });
     },
   });
 
@@ -354,7 +360,7 @@ function UsersPage() {
             user_id: form.user_id.trim(),
             full_name: form.name,
             phone: form.phone || null,
-            role: "cadre",
+            role: (form.role === "FNHW" ? "fnhw" : form.role === "SI" ? "si" : "cadre"),
             cadre_type: form.role as CadreType,
             block_id: scope.isScoped && scope.blockId ? scope.blockId : form.block_id || null,
             village: village || null,
@@ -385,7 +391,7 @@ function UsersPage() {
             pin: form.pin,
             full_name: form.name,
             phone: form.phone || null,
-            role: "cadre",
+            role: (form.role === "FNHW" ? "fnhw" : form.role === "SI" ? "si" : "cadre"),
             cadre_type: form.role as CadreType,
             block_id: scope.isScoped && scope.blockId ? scope.blockId : form.block_id || null,
             village: village || null,
@@ -1059,8 +1065,6 @@ function UsersPage() {
                   <SelectContent>
                     <SelectItem value="block_officer">Block Officer (Block Coordinator)</SelectItem>
                     <SelectItem value="admin">Admin (District Admin)</SelectItem>
-                    <SelectItem value="fnhw">FNHW</SelectItem>
-                    <SelectItem value="si">SI</SelectItem>
                     <SelectItem value="BPM">BPM (Block Programme Manager)</SelectItem>
                     <SelectItem value="DPM">DPM(District Programme Manager)</SelectItem>
                     <SelectItem value="AC">AC (Area Coordinator)</SelectItem>

@@ -246,7 +246,7 @@ export const updateUserProfile = createServerFn({ method: "POST" })
       .eq("user_id", data.id);
     if (targetRolesError) throw new Error(targetRolesError.message);
     const targetRoleList = (targetRoles ?? []).map((r) => r.role);
-    const targetIsCadre = targetRoleList.includes("cadre");
+    const targetIsCadre = targetRoleList.includes("cadre") || targetRoleList.includes("fnhw") || targetRoleList.includes("si");
 
     const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
       .from("profiles")
@@ -330,6 +330,20 @@ export const updateUserProfile = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!updated) throw new Error("User record was not found.");
 
+    if (data.role) {
+      const nextRole = normalizeCreateUserRole(data.role);
+      const { error: deleteRoleErr } = await supabaseAdmin
+        .from("user_roles")
+        .delete()
+        .eq("user_id", data.id);
+      if (deleteRoleErr) throw new Error(deleteRoleErr.message);
+
+      const { error: insertRoleErr } = await supabaseAdmin
+        .from("user_roles")
+        .insert({ user_id: data.id, role: nextRole });
+      if (insertRoleErr) throw new Error(insertRoleErr.message);
+    }
+
     return { id: updated.id, user_id: updated.user_id };
   });
 
@@ -354,7 +368,7 @@ export const deleteUser = createServerFn({ method: "POST" })
         .from("user_roles")
         .select("role")
         .eq("user_id", data.id);
-      const targetIsCadre = (targetRoles ?? []).some((r) => r.role === "cadre");
+      const targetIsCadre = (targetRoles ?? []).some((r) => ["cadre", "fnhw", "si"].includes(r.role));
       if (!targetIsCadre)
         throw new Error("Forbidden: block officers can only delete cadre accounts");
 
