@@ -27,7 +27,7 @@ import { getUserDataScope } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { createUser, deleteUser, resetUserPin, updateUserProfile } from "@/lib/admin.functions";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
-import { isBlockScopedStaffRole, type BlockScopedStaffRole } from "@/lib/roles";
+import { isBlockScopedStaffRole, isFieldOfficerRole, type BlockScopedStaffRole, type FieldOfficerRole } from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/dashboard/users")({
   component: UsersPage,
@@ -48,7 +48,8 @@ interface CadreForm {
   pin: string;
 }
 
-type StaffSystemRole = "admin" | BlockScopedStaffRole;
+// Field officers (fnhw, si) are managed here even though they use the cadre view
+type StaffSystemRole = "admin" | BlockScopedStaffRole | FieldOfficerRole;
 type StaffFormRole = StaffSystemRole | "BPM" | "DPM" | "AC";
 
 interface StaffForm {
@@ -481,7 +482,9 @@ function UsersPage() {
       return;
     }
     const staffSystemRole = getStaffSystemRole(staffForm.role);
-    if (isBlockScopedStaffRole(staffSystemRole) && !staffForm.block_id) {
+    // fnhw/si are block-assigned field officers — they also need a block
+    const isBlockAssigned = isBlockScopedStaffRole(staffSystemRole) || isFieldOfficerRole(staffSystemRole);
+    if (isBlockAssigned && !staffForm.block_id) {
       toast.error("Block-level staff must be assigned to a block.");
       return;
     }
@@ -511,7 +514,7 @@ function UsersPage() {
             full_name: staffForm.name,
             phone: staffForm.phone || null,
             role: staffSystemRole,
-            block_id: isBlockScopedStaffRole(staffSystemRole) ? staffForm.block_id || null : null,
+            block_id: isBlockAssigned ? staffForm.block_id || null : null,
           },
         });
 
@@ -532,7 +535,7 @@ function UsersPage() {
             phone: staffForm.phone || null,
             role: staffSystemRole,
             cadre_type: null,
-            block_id: isBlockScopedStaffRole(staffSystemRole) ? staffForm.block_id || null : null,
+            block_id: isBlockAssigned ? staffForm.block_id || null : null,
           },
         });
         toast.success(`${getStaffRoleLabel(staffForm.role)} created.`);
@@ -1068,7 +1071,8 @@ function UsersPage() {
                 </Select>
               </div>
             )}
-            {isBlockScopedStaffRole(getStaffSystemRole(staffForm.role)) && (
+            {(isBlockScopedStaffRole(getStaffSystemRole(staffForm.role)) ||
+              isFieldOfficerRole(getStaffSystemRole(staffForm.role))) && (
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs font-bold text-slate-500">
                   Assigned Block <span className="text-rose-500">*</span>

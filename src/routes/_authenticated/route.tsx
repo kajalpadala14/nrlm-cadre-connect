@@ -6,7 +6,7 @@ import { useT } from "@/lib/i18n";
 import { User, Languages } from "lucide-react";
 import { useProfile, highestRole } from "@/hooks/use-auth";
 import { useUniversalConsistencySync } from "@/hooks/use-activity-cache-sync";
-import { hasStaffRole } from "@/lib/roles";
+import { hasStaffRole, hasFieldOfficerRole } from "@/lib/roles";
 
 // Routes under /dashboard/* require staff roles.
 // Routes under /cadre/* require cadre role.
@@ -40,7 +40,8 @@ export const Route = createFileRoute("/_authenticated")({
 
     const roles = (roleRows ?? []).map((r) => r.role as string);
     const isStaff = hasStaffRole(roles);
-    const isCadre = roles.includes("cadre");
+    // Field officers (fnhw, si) use the cadre/field-officer view — treat them like cadre for routing
+    const isCadre = roles.includes("cadre") || hasFieldOfficerRole(roles);
 
     // A user with no recognized role has no valid section — send to auth.
     if (!isStaff && !isCadre) {
