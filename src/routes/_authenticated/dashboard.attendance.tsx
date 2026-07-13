@@ -36,6 +36,20 @@ export const Route = createFileRoute("/_authenticated/dashboard/attendance")({
   component: AttendancePage,
 });
 
+const istTimeFormatter = new Intl.DateTimeFormat("en-IN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+  timeZone: "Asia/Kolkata",
+});
+
+const formatISTTime = (timestamp: string) => istTimeFormatter.format(new Date(timestamp));
+
+const toISTTimestamp = (dateStr: string, hour: number, minute: number) =>
+  new Date(
+    `${dateStr}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+05:30`,
+  ).toISOString();
+
 function AttendancePage() {
   const { t } = useT();
   const { data: profile } = useProfile();
@@ -112,26 +126,56 @@ function AttendancePage() {
     },
   });
 
-  const isLoading = isCadresLoading || isAttendanceLoading;
+  const { data: approvedLeaveRecords = [], isLoading: isApprovedLeavesLoading } = useQuery({
+    queryKey: ["attendance-approved-leaves", dateStr, scope.blockId ?? "all"],
+    enabled: scope.ready,
+    queryFn: async () => {
+      let leaveQ = supabase
+        .from("leave_requests")
+        .select("id, cadre_id, block_id, leave_type, from_date, to_date, status")
+        .eq("status", "approved")
+        .lte("from_date", dateStr)
+        .gte("to_date", dateStr);
+
+      if (scope.isScoped && scope.blockId) {
+        const cadreIds = await getCadreIdsInBlock(scope.blockId);
+        leaveQ = applyScopeToQuery(leaveQ, true, scope.blockId, cadreIds);
+      }
+
+      const { data, error } = await leaveQ;
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const isLoading = isCadresLoading || isAttendanceLoading || isApprovedLeavesLoading;
 
   // Only include cadres that have an explicit attendance record for the selected date.
   // Cadres with no record on the selected date are NOT shown — they are not "Absent",
   // they simply have not been marked yet. This prevents synthetic rows from appearing
   // when browsing past or future dates.
   const computedAttendance = cadres
-    .filter((cadre) => attendanceRecords.some((r) => r.cadre_id === cadre.id))
+    .filter(
+      (cadre) =>
+        attendanceRecords.some((r) => r.cadre_id === cadre.id) ||
+        approvedLeaveRecords.some((leave) => leave.cadre_id === cadre.id),
+    )
     .map((cadre) => {
-      const record = attendanceRecords.find((r) => r.cadre_id === cadre.id)!;
+      const record = attendanceRecords.find((r) => r.cadre_id === cadre.id);
+      const approvedLeave = approvedLeaveRecords.find((leave) => leave.cadre_id === cadre.id);
+      const dbStatus = approvedLeave ? "on_leave" : record?.status;
 
-      let uiStatus = getAttendanceStatusLabel(record.status);
+      let uiStatus = getAttendanceStatusLabel(dbStatus);
       let checkInStr = "—";
       let checkOutStr = "—";
 
-      if (record.check_in_at) {
-        checkInStr = format(new Date(record.check_in_at), "hh:mm a");
+      const checkInAt = record?.check_in_at ?? record?.photo_uploaded_at;
+
+      if (checkInAt) {
+        checkInStr = formatISTTime(checkInAt);
       }
-      if ((record.status === "present" || record.status === "late") && record.check_out_at) {
-        checkOutStr = format(new Date(record.check_out_at), "hh:mm a");
+      if ((dbStatus === "present" || dbStatus === "late") && record?.check_out_at) {
+        checkOutStr = formatISTTime(record.check_out_at);
       }
 
       return {
@@ -163,18 +207,13 @@ function AttendancePage() {
     let check_out_at: string | null = null;
     let dbStatus: "present" | "late" | "absent" | "pending" | "pending_verification" | "on_leave" | "holiday" = "absent";
 
-    const selectedDate = new Date(date);
-
     if (newStatus === "Present") {
       dbStatus = "present";
-      selectedDate.setHours(9, 0, 0, 0);
-      check_in_at = selectedDate.toISOString();
-      selectedDate.setHours(17, 0, 0, 0);
-      check_out_at = selectedDate.toISOString();
+      check_in_at = toISTTimestamp(dateStr, 9, 0);
+      check_out_at = toISTTimestamp(dateStr, 17, 0);
     } else if (newStatus === "Late") {
       dbStatus = "late";
-      selectedDate.setHours(19, 1, 0, 0);
-      check_in_at = selectedDate.toISOString();
+      check_in_at = toISTTimestamp(dateStr, 19, 1);
       check_out_at = null;
     } else if (newStatus === "Leave") {
       dbStatus = "on_leave";
