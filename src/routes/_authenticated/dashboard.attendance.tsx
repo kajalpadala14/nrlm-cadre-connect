@@ -30,7 +30,12 @@ import { useProfile } from "@/hooks/use-auth";
 import { getUserDataScope, getCadreIdsInBlock, applyScopeToQuery } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { getAttendanceStatusLabel } from "@/lib/utils/attendance";
+import {
+  deriveAttendanceStatus,
+  getAttendanceStatusLabel,
+  getDeadlineIST,
+  toISTDateString,
+} from "@/lib/utils/attendance";
 
 export const Route = createFileRoute("/_authenticated/dashboard/attendance")({
   component: AttendancePage,
@@ -150,20 +155,28 @@ function AttendancePage() {
 
   const isLoading = isCadresLoading || isAttendanceLoading || isApprovedLeavesLoading;
 
-  // Only include cadres that have an explicit attendance record for the selected date.
-  // Cadres with no record on the selected date are NOT shown — they are not "Absent",
-  // they simply have not been marked yet. This prevents synthetic rows from appearing
-  // when browsing past or future dates.
+  // Once a day is finalized, cadres without an attendance row are still absent.
+  // Before the deadline and on future/Sunday dates, keep showing explicit rows only.
+  const todayIST = toISTDateString(new Date());
+  const isFutureDate = dateStr > todayIST;
+  const isSunday = date.getDay() === 0;
+  const isAfterDeadline = new Date() > getDeadlineIST(dateStr);
+  const shouldShowMissingAsAbsent =
+    !isFutureDate && !isSunday && (dateStr < todayIST || isAfterDeadline);
+
   const computedAttendance = cadres
     .filter(
       (cadre) =>
+        shouldShowMissingAsAbsent ||
         attendanceRecords.some((r) => r.cadre_id === cadre.id) ||
         approvedLeaveRecords.some((leave) => leave.cadre_id === cadre.id),
     )
     .map((cadre) => {
       const record = attendanceRecords.find((r) => r.cadre_id === cadre.id);
       const approvedLeave = approvedLeaveRecords.find((leave) => leave.cadre_id === cadre.id);
-      const dbStatus = approvedLeave ? "on_leave" : record?.status;
+      const dbStatus = approvedLeave
+        ? "on_leave"
+        : deriveAttendanceStatus(record?.status, dateStr);
 
       let uiStatus = getAttendanceStatusLabel(dbStatus);
       let checkInStr = "—";
