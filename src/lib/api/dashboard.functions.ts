@@ -61,6 +61,7 @@ export const getDashboardStats = createServerFn({ method: "POST" })
     return typedStats as {
       total_cadres: number;
       present_today: number;
+      late_today: number;
       absent_today: number;
       on_leave_today: number;
       activities_today: number;
@@ -113,6 +114,7 @@ export const getBlockSummary = createServerFn({ method: "POST" })
       block_name: string;
       total_cadres: number;
       present: number;
+      late: number;
       absent: number;
       on_leave: number;
       activities: number;

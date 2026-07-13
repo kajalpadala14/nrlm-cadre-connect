@@ -173,7 +173,7 @@ function AttendancePage() {
       check_out_at = selectedDate.toISOString();
     } else if (newStatus === "Late") {
       dbStatus = "late";
-      selectedDate.setHours(18, 1, 0, 0);
+      selectedDate.setHours(19, 1, 0, 0);
       check_in_at = selectedDate.toISOString();
       check_out_at = null;
     } else if (newStatus === "Leave") {

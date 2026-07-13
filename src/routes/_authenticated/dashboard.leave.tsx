@@ -34,7 +34,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useT } from "@/lib/i18n";
 import { useProfile } from "@/hooks/use-auth";
-import { getUserDataScope } from "@/lib/data-scope";
+import { getCadreIdsInBlock, getUserDataScope, applyScopeToQuery } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -52,6 +52,7 @@ const LEAVE_TYPES = [
 ];
 
 const CADRE_TYPES = ["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender", "FNHW", "SI"];
+const ANNUAL_LEAVE_ALLOWANCE_DAYS = 30;
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; icon: React.ReactNode }> = {
   pending: {
@@ -154,12 +155,13 @@ function DashboardLeavePage() {
     queryFn: async () => {
       let query = supabase.from("leave_requests").select(`
         *,
-        profiles!leave_requests_cadre_id_fkey(id, full_name, cadre_type, phone),
+        profiles!leave_requests_cadre_id_fkey(id, full_name, cadre_type, phone, block_id),
         blocks(id, name)
       `);
 
       if (scope.isScoped && scope.blockId) {
-        query = query.eq("block_id", scope.blockId);
+        const cadreIds = await getCadreIdsInBlock(scope.blockId);
+        query = applyScopeToQuery(query, true, scope.blockId, cadreIds);
       }
 
       const { data, error } = await query.order("created_at", { ascending: false });
@@ -202,7 +204,10 @@ function DashboardLeavePage() {
   const filteredRequests = useMemo(() => {
     return leaveRequests.filter((leave) => {
       // Scoping & Block filter
-      const matchesBlock = blockFilter === "all" || leave.block_id === blockFilter;
+      const matchesBlock =
+        blockFilter === "all" ||
+        leave.block_id === blockFilter ||
+        leave.profiles?.block_id === blockFilter;
 
       // Cadre Type filter
       const cadreType = leave.profiles?.cadre_type;
@@ -248,6 +253,38 @@ function DashboardLeavePage() {
     toDateFilter,
     searchTerm,
   ]);
+
+  const selectedLeaveBalance = useMemo(() => {
+    if (!selectedLeave) return null;
+
+    const cadreId = selectedLeave.cadre_id;
+    const leaveYear = String(new Date(selectedLeave.from_date).getFullYear());
+    const approvedForYear = leaveRequests.filter(
+      (leave) =>
+        leave.cadre_id === cadreId &&
+        leave.status === "approved" &&
+        String(new Date(leave.from_date).getFullYear()) === leaveYear,
+    );
+    const approvedDaysTaken = approvedForYear.reduce(
+      (sum, leave) => sum + (Number(leave.total_days) || 0),
+      0,
+    );
+    const remainingDays = Math.max(ANNUAL_LEAVE_ALLOWANCE_DAYS - approvedDaysTaken, 0);
+    const requestedDays = Number(selectedLeave.total_days) || 0;
+    const projectedRemainingDays =
+      selectedLeave.status === "pending"
+        ? Math.max(remainingDays - requestedDays, 0)
+        : remainingDays;
+
+    return {
+      leaveYear,
+      approvedRequests: approvedForYear.length,
+      approvedDaysTaken,
+      remainingDays,
+      requestedDays,
+      projectedRemainingDays,
+    };
+  }, [leaveRequests, selectedLeave]);
 
   const handleDecision = async (decision: "approved" | "rejected") => {
     if (!selectedLeave) return;
@@ -763,6 +800,57 @@ function DashboardLeavePage() {
                   </p>
                 </div>
               </div>
+
+              {selectedLeaveBalance && (
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[9px] text-indigo-500 font-black uppercase tracking-wider">
+                      {lang === "hi" ? "अवकाश सारांश" : "Leave Balance"}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-black text-indigo-700 border border-indigo-100">
+                      {selectedLeaveBalance.leaveYear}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg bg-white border border-indigo-100 p-2">
+                      <span className="block text-[9px] font-bold uppercase text-slate-400">
+                        {lang === "hi" ? "पहले लिए गए" : "Taken"}
+                      </span>
+                      <p className="mt-0.5 text-lg font-black text-slate-800">
+                        {selectedLeaveBalance.approvedDaysTaken}
+                        <span className="ml-1 text-[10px] font-bold text-slate-400">
+                          {lang === "hi" ? "दिन" : "days"}
+                        </span>
+                      </p>
+                      <p className="text-[9px] font-semibold text-slate-400">
+                        {selectedLeaveBalance.approvedRequests}{" "}
+                        {lang === "hi" ? "स्वीकृत आवेदन" : "approved request(s)"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-white border border-indigo-100 p-2">
+                      <span className="block text-[9px] font-bold uppercase text-slate-400">
+                        {lang === "hi" ? "बाकी" : "Remaining"}
+                      </span>
+                      <p className="mt-0.5 text-lg font-black text-emerald-700">
+                        {selectedLeaveBalance.remainingDays}
+                        <span className="ml-1 text-[10px] font-bold text-slate-400">
+                          {lang === "hi" ? "दिन" : "days"}
+                        </span>
+                      </p>
+                      <p className="text-[9px] font-semibold text-slate-400">
+                        {lang === "hi" ? "कुल सीमा" : "Allowance"}: {ANNUAL_LEAVE_ALLOWANCE_DAYS}
+                      </p>
+                    </div>
+                  </div>
+                  {selectedLeave.status === "pending" && (
+                    <div className="rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-2 text-[10px] font-bold text-amber-800">
+                      {lang === "hi"
+                        ? `इस आवेदन (${selectedLeaveBalance.requestedDays} दिन) को स्वीकृत करने के बाद बाकी: ${selectedLeaveBalance.projectedRemainingDays} दिन`
+                        : `After approving this request (${selectedLeaveBalance.requestedDays} days), remaining balance: ${selectedLeaveBalance.projectedRemainingDays} days`}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Leave Details */}
               <div className="space-y-3">

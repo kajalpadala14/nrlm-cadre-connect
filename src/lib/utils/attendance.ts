@@ -2,10 +2,10 @@
  * Utility functions for calculating and classifying attendance metrics.
  *
  * Attendance Rules (photo-based, IST deadline):
- *   - Photo uploaded on activity_date at or before 18:00 IST → present
- *   - Photo uploaded on activity_date after  18:00 IST       → late
+ *   - Photo uploaded on activity_date at or before 19:00 IST → present
+ *   - Photo uploaded on activity_date after  19:00 IST       → late
  *   - No photo by end of day                                  → absent
- *   - No photo yet, current time before 18:00 IST (today)    → pending (UI-derived)
+ *   - No photo yet, current time before 19:00 IST (today)    → pending (UI-derived)
  *
  * All classification is authoritative on the DB side via classify_attendance_status().
  * This file provides client-side display helpers and the same logic in TypeScript
@@ -40,9 +40,9 @@ export function toISTDateString(d: Date): string {
   return ist.toISOString().slice(0, 10);
 }
 
-/** Returns the 18:00 IST deadline for a given ISO date string 'YYYY-MM-DD'. */
+/** Returns the 19:00 IST deadline for a given ISO date string 'YYYY-MM-DD'. */
 export function getDeadlineIST(activityDate: string): Date {
-  return new Date(`${activityDate}T18:00:00+05:30`);
+  return new Date(`${activityDate}T19:00:00+05:30`);
 }
 
 // ── Core classification (mirrors DB classify_attendance_status) ──────────
@@ -68,8 +68,8 @@ export function classifyAttendanceStatus(
  * Used when a DB row may not exist yet (pending state).
  *
  * - If there's a DB status → return it directly
- * - If no DB row (null) and today before 18:00 IST → 'pending'
- * - If no DB row (null) and past 18:00 IST or past date → 'absent'
+ * - If no DB row (null) and today before 19:00 IST → 'pending'
+ * - If no DB row (null) and past 19:00 IST or past date → 'absent'
  */
 export function deriveAttendanceStatus(
   dbStatus: AttendanceDbStatus | null | undefined,

@@ -75,15 +75,17 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayAttendance = attendance.filter(a => a.date === todayStr);
   const presentCount = todayAttendance.filter(a => a.status === "present").length;
+  const lateCount = todayAttendance.filter(a => a.status === "late").length;
   const leaveCount = todayAttendance.filter(a => a.status === "on_leave").length;
   const absentCount = todayAttendance.filter(a => a.status === "absent").length;
   
-  const attendanceRate = calculateAttendanceRate(presentCount, leaveCount, activeCadres);
+  const attendanceRate = calculateAttendanceRate(presentCount, leaveCount, activeCadres, lateCount);
 
   // Debug output as requested
   console.log("=== PUBLIC PAGE ATTENDANCE DEBUG ===");
   console.log(`Total Active Cadres: ${activeCadres}`);
   console.log(`Present Count: ${presentCount}`);
+  console.log(`Late Count: ${lateCount}`);
   console.log(`Leave Count: ${leaveCount}`);
   console.log(`Absent Count: ${absentCount}`);
   console.log(`Calculated Percentage: ${attendanceRate}%`);
@@ -151,6 +153,7 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
     return {
       label: labels[i],
       present: dayRows.filter((r) => r.status === "present").length,
+      late: dayRows.filter((r) => r.status === "late").length,
       absent: dayRows.filter((r) => r.status === "absent").length,
     };
   });
