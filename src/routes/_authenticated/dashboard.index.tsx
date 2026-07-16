@@ -35,6 +35,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
 import {
