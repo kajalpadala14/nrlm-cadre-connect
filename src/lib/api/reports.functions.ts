@@ -16,6 +16,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
 import { ACTIVITY_TYPES, normalizeActivityType } from "@/constants/activityTypes";
+import { groupByVillageKey } from "@/lib/utils/villages";
 
 // ─── Guard helper ─────────────────────────────────────────────
 
@@ -242,14 +243,12 @@ export const getCoverageReport = createServerFn({ method: "POST" })
     const { data: rows, error } = await query;
     if (error) throw new Error(`Report error: ${error.message}`);
 
-    // Unique villages
-    const villages = new Set((rows ?? []).map((r) => r.village_name));
-
-    // Per-village stats
-    const villageStats = Array.from(villages).map((village) => {
-      const villageActivities = (rows ?? []).filter((r) => r.village_name === village);
+    // Village coverage uses a normalized village key so spacing/case and known
+    // spelling aliases do not inflate reached/covered counts.
+    const villages = groupByVillageKey(rows ?? [], (r) => r.village_name);
+    const villageStats = Array.from(villages.values()).map(({ displayName, rows: villageActivities }) => {
       return {
-        village_name: village,
+        village_name: displayName,
         visit_count: villageActivities.length,
         unique_cadres: new Set(
           villageActivities.map((r) => (r.profiles as { full_name?: string } | null)?.full_name),

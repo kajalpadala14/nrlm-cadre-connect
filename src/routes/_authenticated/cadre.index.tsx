@@ -47,6 +47,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
+import { uniqueVillageCount } from "@/lib/utils/villages";
 import {
   BarChart,
   Bar,
@@ -254,14 +255,14 @@ function CadreDashboard() {
 
   const todaySummary = useMemo(() => ({
     activities:    todayActivities.length,
-    villages:      new Set(todayActivities.map((a) => a.village_name)).size,
+    villages:      uniqueVillageCount(todayActivities, (a) => a.village_name),
     beneficiaries: todayActivities.reduce((s, a) => s + (a.beneficiaries ?? 0), 0),
     withPhoto:     todayActivities.filter((a) => !!a.photo_url).length,
   }), [todayActivities]);
 
   const monthlySummary = useMemo(() => {
     const totalActs     = monthActivities.length;
-    const villages      = new Set(monthActivities.map((a) => a.village_name)).size;
+    const villages      = uniqueVillageCount(monthActivities, (a) => a.village_name);
     const beneficiaries = monthActivities.reduce((s, a) => s + (a.beneficiaries ?? 0), 0);
     const approved      = monthActivities.filter((a) => a.status === "Approved").length;
     const pending       = monthActivities.filter((a) => a.status === "Pending").length;

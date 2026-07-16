@@ -1,7 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
-import { hasAdminRole, hasBlockScopedStaffRole, type AppRole } from "@/lib/roles";
+import {
+  hasAdminRole,
+  hasBlockScopedStaffRole,
+  isCadreAccountRole,
+  type AppRole,
+} from "@/lib/roles";
+import { standardizeVillageName } from "@/lib/utils/villages";
 import { z } from "zod";
 
 const userIdSchema = z
@@ -174,7 +180,7 @@ export const createUser = createServerFn({ method: "POST" })
           phone: data.phone ?? null,
           cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
           block_id: data.block_id ?? null,
-          village: systemRole === "cadre" ? (data.village ?? null) : null,
+          village: systemRole === "cadre" ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
           panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
           gender: systemRole === "cadre" ? (data.gender ?? null) : null,
           join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
@@ -205,7 +211,7 @@ export const createUser = createServerFn({ method: "POST" })
       phone: data.phone ?? null,
       cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
       block_id: data.block_id ?? null,
-      village: systemRole === "cadre" ? (data.village ?? null) : null,
+      village: systemRole === "cadre" ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
       panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
       gender: systemRole === "cadre" ? (data.gender ?? null) : null,
       join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
@@ -314,7 +320,7 @@ export const updateUserProfile = createServerFn({ method: "POST" })
       phone: data.phone ?? null,
       cadre_type: targetIsCadre ? (data.cadre_type ?? null) : null,
       block_id: data.block_id ?? null,
-      village: targetIsCadre ? (data.village ?? null) : null,
+      village: targetIsCadre ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
       panchayat: targetIsCadre ? (data.panchayat ?? null) : null,
       gender: targetIsCadre ? (data.gender ?? null) : null,
       join_date: targetIsCadre ? (data.join_date ?? null) : null,
@@ -409,7 +415,7 @@ export const resetUserPin = createServerFn({ method: "POST" })
         .from("user_roles")
         .select("role")
         .eq("user_id", data.id);
-      const targetIsCadre = (targetRoles ?? []).some((r) => r.role === "cadre");
+      const targetIsCadre = (targetRoles ?? []).some((r) => isCadreAccountRole(r.role));
       if (!targetIsCadre) throw new Error("Forbidden: block officers can only reset cadre PINs");
 
       const [{ data: myProfile }, { data: targetProfile }] = await Promise.all([

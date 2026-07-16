@@ -1,5 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
-import { calculateAttendanceRate } from "@/lib/utils/attendance";
+import {
+  logAttendanceDebug,
+  summarizeAttendanceForRate,
+  toISTDateString,
+} from "@/lib/utils/attendance";
+import { CADRE_ACCOUNT_ROLES } from "@/lib/roles";
+import { uniqueVillageCount } from "@/lib/utils/villages";
 
 function last30Days(): string[] {
   const days: string[] = [];
@@ -40,7 +46,7 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
     recentActivitiesResult,
     attendanceResult,
   ] = await Promise.all([
-    supabaseAdmin.from("user_roles").select("user_id").eq("role", "cadre"),
+    supabaseAdmin.from("user_roles").select("user_id").in("role", [...CADRE_ACCOUNT_ROLES]),
     supabaseAdmin.from("blocks").select("id, name").order("name"),
     supabaseAdmin.from("activities").select("id, cadre_id, block_id, village_name, activity_date, status"),
     supabaseAdmin
@@ -68,35 +74,29 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
   const recentActivities = recentActivitiesResult.data ?? [];
   const attendance = attendanceResult.data ?? [];
   const totalCadres = cadreIds.length;
-  const activeCadres = profiles.filter((p) => (p.status ?? "Active") === "Active").length;
+  const activeCadreIds = profiles
+    .filter((p) => (p.status ?? "Active") === "Active")
+    .map((p) => p.id);
+  const activeCadres = activeCadreIds.length;
   const totalActivities = activities.length;
-  const villagesCovered = new Set(activities.map((a) => a.village_name).filter(Boolean)).size;
+  const villagesCovered = uniqueVillageCount(activities, (a) => a.village_name);
   const approvedActivities = activities.filter((a) => a.status === "Approved").length;
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = toISTDateString(new Date());
   const todayAttendance = attendance.filter(a => a.date === todayStr);
-  const presentCount = todayAttendance.filter(a => a.status === "present").length;
-  const lateCount = todayAttendance.filter(a => a.status === "late").length;
-  const leaveCount = todayAttendance.filter(a => a.status === "on_leave").length;
-  const absentCount = todayAttendance.filter(a => a.status === "absent").length;
-  
-  const attendanceRate = calculateAttendanceRate(presentCount, leaveCount, activeCadres, lateCount);
+  const districtAttendanceSummary = summarizeAttendanceForRate(todayAttendance, activeCadreIds);
+  const attendanceRate = districtAttendanceSummary.finalAttendanceRate;
 
-  // Debug output as requested
-  console.log("=== PUBLIC PAGE ATTENDANCE DEBUG ===");
-  console.log(`Total Active Cadres: ${activeCadres}`);
-  console.log(`Present Count: ${presentCount}`);
-  console.log(`Late Count: ${lateCount}`);
-  console.log(`Leave Count: ${leaveCount}`);
-  console.log(`Absent Count: ${absentCount}`);
-  console.log(`Calculated Percentage: ${attendanceRate}%`);
-  console.log("====================================");
+  logAttendanceDebug("PUBLIC PAGE", districtAttendanceSummary);
 
   const blockData = (blocksResult.data ?? []).map((b) => {
     // Resolve activities via cadre profiles because activities.block_id is often NULL.
     // The authoritative block assignment is profiles.block_id.
     const blockCadreIds = profiles.filter((p) => p.block_id === b.id).map((p) => p.id);
     const blockProfiles = profiles.filter((p) => p.block_id === b.id);
-    const activeCadresInBlock = blockProfiles.filter((p) => (p.status ?? "Active") === "Active").length;
+    const activeCadreIdsInBlock = blockProfiles
+      .filter((p) => (p.status ?? "Active") === "Active")
+      .map((p) => p.id);
+    const activeCadresInBlock = activeCadreIdsInBlock.length;
 
     // Match activities by cadre_id (reliable) OR block_id (set for newer submissions)
     const acts = activities.filter(
@@ -107,9 +107,10 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
     const blockTodayAtt = attendance.filter(
       (a) => blockCadreIds.includes(a.cadre_id) && a.date === todayStr,
     );
-    const blockPresent = blockTodayAtt.filter((a) => a.status === "present" || a.status === "late").length;
-    const blockLeave = blockTodayAtt.filter((a) => a.status === "on_leave").length;
-    const blockAttRate = calculateAttendanceRate(blockPresent, blockLeave, activeCadresInBlock);
+    const blockAttendanceSummary = summarizeAttendanceForRate(blockTodayAtt, activeCadreIdsInBlock);
+    const blockPresent = blockAttendanceSummary.presentCount + blockAttendanceSummary.lateCount;
+    const blockLeave = blockAttendanceSummary.leaveCount;
+    const blockAttRate = blockAttendanceSummary.finalAttendanceRate;
 
     // Clean block name — strip Hindi in parentheses e.g. "Geedam (गीदम)" → "Geedam"
     const cleanName = b.name.replace(/\s*\(.*?\)\s*/g, "").trim();
@@ -122,7 +123,7 @@ export const getPublicDashboardData = createServerFn({ method: "POST" }).handler
       activities: acts.length,
       approved: acts.filter((a) => a.status === "Approved").length,
       pending: acts.filter((a) => a.status === "Pending").length,
-      villages: new Set(acts.map((a) => a.village_name).filter(Boolean)).size,
+      villages: uniqueVillageCount(acts, (a) => a.village_name),
       present: blockPresent,
       on_leave: blockLeave,
       attendanceRate: blockAttRate,

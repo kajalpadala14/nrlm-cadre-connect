@@ -20,6 +20,8 @@ import { exportToExcel } from "@/lib/excel";
 import { cn } from "@/lib/utils";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
+import { CADRE_ACCOUNT_ROLES, CADRE_TYPE_LABELS, CADRE_TYPE_OPTIONS } from "@/lib/roles";
+import { uniqueVillageCount } from "@/lib/utils/villages";
 
 export const Route = createFileRoute("/_authenticated/dashboard/reports")({
   component: ReportsPage,
@@ -349,20 +351,7 @@ function ReportsPage() {
 // Full label map for every possible role value the UI requested.
 // Roles not present in the DB will be hidden automatically.
 const ROLE_LABEL_MAP: Record<string, string> = {
-  PRP: "PRP",
-  FLCRP: "FLCRP",
-  RBK: "RBK",
-  IFC_Anchor: "IFC Anchor",
-  SR_CRP: "SR CRP",
-  Block_Coordinator: "Block Coordinator",
-  BPM: "BPM (Block Project Manager)",
-  BPO: "BPO (Block Programme Officer)",
-  DPM: "DPM (District Project Manager)",
-  CEO: "CEO",
-  FPO_CEO: "FPO CEO",
-  Gender: "Gender",
-  FNHW: "FNHW",
-  SI: "SI",
+  ...CADRE_TYPE_LABELS,
 };
 
 // Fetches distinct cadre_type values that actually exist in profiles.
@@ -390,8 +379,8 @@ function AttendanceReport({ from, to, blockId, selfCadreId }: { from: string; to
   const [roleFilter, setRoleFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  // Live distinct roles for the dropdown — auto-hides absent roles
-  const { data: availableRoles = [] } = useDistinctCadreTypes(blockId);
+  // Show every supported cadre role in the report filter.
+  const availableRoles = CADRE_TYPE_OPTIONS;
 
   const { data: raw = [], isLoading, error: queryError } = useQuery({
     queryKey: ["rpt-attendance", from, to, blockId, selfCadreId],
@@ -725,14 +714,17 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
   const { t } = useT();
   const [roleFilter, setRoleFilter] = useState("all");
 
-  // Live distinct roles for the dropdown — auto-hides absent roles
-  const { data: availableRoles = [] } = useDistinctCadreTypes(blockId);
+  // Show every supported cadre role in the report filter.
+  const availableRoles = CADRE_TYPE_OPTIONS;
 
   // 1. All cadre profiles
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
     queryKey: ["rpt-cp-profiles", blockId],
     queryFn: async () => {
-      const { data: urData } = await supabase.from("user_roles").select("user_id").eq("role", "cadre");
+      const { data: urData } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .in("role", [...CADRE_ACCOUNT_ROLES]);
       const ids = (urData ?? []).map((r) => r.user_id);
       if (ids.length === 0) return [];
       let q = supabase.from("profiles").select("id, full_name, user_id, cadre_type, village, blocks!profiles_block_id_fkey(name)").in("id", ids);
@@ -789,7 +781,7 @@ function CadrePerformanceReport({ from, to, blockId }: { from: string; to: strin
         const pending = acts.filter((a: any) => a.status === "Pending").length;
         const rejected = acts.filter((a: any) => a.status === "Rejected").length;
         const approvalRate = totalActs > 0 ? ((approved / totalActs) * 100).toFixed(1) + "%" : "—";
-        const villages = new Set(acts.map((a: any) => a.village_name)).size;
+        const villages = uniqueVillageCount(acts, (a: any) => a.village_name);
         const beneficiaries = acts.reduce((s: number, a: any) => s + (a.beneficiaries ?? 0), 0);
         return {
           profile: p,
@@ -910,7 +902,10 @@ function BlockPerformanceReport({ from, to, blockId }: { from: string; to: strin
   const { data: profilesData = [], isLoading: loadingProfiles } = useQuery({
     queryKey: ["rpt-bp-profiles", blockId],
     queryFn: async () => {
-      const { data: urData } = await supabase.from("user_roles").select("user_id").eq("role", "cadre");
+      const { data: urData } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .in("role", [...CADRE_ACCOUNT_ROLES]);
       const ids = (urData ?? []).map((r) => r.user_id);
       if (ids.length === 0) return [];
       let q = supabase.from("profiles").select("id, block_id").in("id", ids);
@@ -941,7 +936,7 @@ function BlockPerformanceReport({ from, to, blockId }: { from: string; to: strin
       const pending = bAct.filter((a: any) => a.status === "Pending").length;
       const rejected = bAct.filter((a: any) => a.status === "Rejected").length;
       const approvalRate = totalActs > 0 ? ((approved / totalActs) * 100).toFixed(1) + "%" : "—";
-      const villages = new Set(bAct.map((a: any) => a.village_name)).size;
+      const villages = uniqueVillageCount(bAct, (a: any) => a.village_name);
       const beneficiaries = bAct.reduce((s: number, a: any) => s + (a.beneficiaries ?? 0), 0);
 
       return { name: b.name, totalCadres, present, late, absent, avgAttPct, totalActs, approved, pending, rejected, approvalRate, villages, beneficiaries };

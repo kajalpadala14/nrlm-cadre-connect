@@ -31,6 +31,19 @@ export type AttendanceBusinessStatus =
   | "On Leave"
   | "Holiday";
 
+export interface AttendanceCountSummary {
+  totalUsers: number;
+  expectedCount: number;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  pendingCount: number;
+  leaveCount: number;
+  holidayCount: number;
+  duplicateRows: number;
+  finalAttendanceRate: number;
+}
+
 // ── IST helpers ──────────────────────────────────────────────────────────
 
 /** Returns a date string 'YYYY-MM-DD' in IST (UTC+5:30). */
@@ -96,20 +109,109 @@ export function deriveAttendanceStatus(
 
 /**
  * Calculates the attendance rate based on the standard formula:
- * ((Present + Late + Approved Leave) / Total Active Cadres) * 100
+ * ((Present + Late) / Total Users) * 100
  *
  * Both Present and Late count positively toward attendance.
- * Approved leave is counted so cadres are not penalised for official leaves.
+ * Absent, pending, pending_verification, leave, and holiday remain in the
+ * denominator, but never in the numerator.
  */
 export function calculateAttendanceRate(
   presentCount: number,
   leaveCount: number,
   totalActiveCadres: number,
   lateCount: number = 0,
+  holidayCount: number = 0,
 ): number {
   if (!totalActiveCadres || totalActiveCadres <= 0) return 0;
-  const rate = ((presentCount + lateCount + leaveCount) / totalActiveCadres) * 100;
+  const rate = ((presentCount + lateCount) / totalActiveCadres) * 100;
   return Math.min(100, Math.round(rate));
+}
+
+/**
+ * Builds a de-duplicated attendance summary for one date.
+ *
+ * The attendance table is intended to have one row per cadre per day, but this
+ * guard keeps KPIs correct even if legacy/imported data has duplicate rows.
+ */
+export function summarizeAttendanceForRate(
+  rows: Array<{ cadre_id: string | null; status: AttendanceDbStatus | string | null }>,
+  activeCadreIds: readonly string[],
+): AttendanceCountSummary {
+  const activeSet = new Set(activeCadreIds);
+  const statusRank: Record<string, number> = {
+    present: 7,
+    late: 6,
+    on_leave: 5,
+    holiday: 4,
+    absent: 3,
+    pending_verification: 2,
+    pending: 1,
+  };
+  const bestStatusByCadre = new Map<string, string>();
+  let duplicateRows = 0;
+
+  rows.forEach((row) => {
+    if (!row.cadre_id || !activeSet.has(row.cadre_id)) return;
+    const nextStatus = row.status ?? "pending";
+    const previousStatus = bestStatusByCadre.get(row.cadre_id);
+    if (previousStatus) duplicateRows += 1;
+    if (!previousStatus || (statusRank[nextStatus] ?? 0) > (statusRank[previousStatus] ?? 0)) {
+      bestStatusByCadre.set(row.cadre_id, nextStatus);
+    }
+  });
+
+  let presentCount = 0;
+  let lateCount = 0;
+  let absentCount = 0;
+  let pendingCount = 0;
+  let leaveCount = 0;
+  let holidayCount = 0;
+
+  bestStatusByCadre.forEach((status) => {
+    if (status === "present") presentCount += 1;
+    else if (status === "late") lateCount += 1;
+    else if (status === "absent") absentCount += 1;
+    else if (status === "on_leave") leaveCount += 1;
+    else if (status === "holiday") holidayCount += 1;
+    else if (status === "pending" || status === "pending_verification") pendingCount += 1;
+  });
+
+  const totalUsers = activeCadreIds.length;
+  const expectedCount = totalUsers;
+
+  return {
+    totalUsers,
+    expectedCount,
+    presentCount,
+    lateCount,
+    absentCount,
+    pendingCount,
+    leaveCount,
+    holidayCount,
+    duplicateRows,
+    finalAttendanceRate: calculateAttendanceRate(
+      presentCount,
+      leaveCount,
+      totalUsers,
+      lateCount,
+      holidayCount,
+    ),
+  };
+}
+
+export function logAttendanceDebug(label: string, summary: AttendanceCountSummary) {
+  console.log(`=== ${label} ATTENDANCE DEBUG ===`);
+  console.log(`Total Users: ${summary.totalUsers}`);
+  console.log(`Attendance Denominator / Total Users: ${summary.expectedCount}`);
+  console.log(`Present Count: ${summary.presentCount}`);
+  console.log(`Late Count: ${summary.lateCount}`);
+  console.log(`Absent Count: ${summary.absentCount}`);
+  console.log(`Pending Count: ${summary.pendingCount}`);
+  console.log(`Leave Count: ${summary.leaveCount}`);
+  console.log(`Holiday Count: ${summary.holidayCount}`);
+  console.log(`Duplicate Attendance Rows Ignored: ${summary.duplicateRows}`);
+  console.log(`Final Attendance Rate: ${summary.finalAttendanceRate}%`);
+  console.log("====================================");
 }
 
 // ── Display helpers ──────────────────────────────────────────────────────

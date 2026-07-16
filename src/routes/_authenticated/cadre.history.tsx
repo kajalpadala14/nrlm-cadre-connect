@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { ACTIVITY_TYPES, normalizeActivityType } from "@/constants/activityTypes";
+import { normalizeVillageKey, uniqueVillageCount } from "@/lib/utils/villages";
 
 export const Route = createFileRoute("/_authenticated/cadre/history")({
   component: HistoryPage,
@@ -76,8 +77,12 @@ function HistoryPage() {
 
   // Unique villages extraction from fetched activities list
   const uniqueVillages = useMemo(() => {
-    const villages = data.map((a) => a.village_name).filter(Boolean);
-    return Array.from(new Set(villages)).sort();
+    const villageMap = new Map<string, string>();
+    data.forEach((a) => {
+      const key = normalizeVillageKey(a.village_name);
+      if (key && !villageMap.has(key)) villageMap.set(key, a.village_name);
+    });
+    return Array.from(villageMap.values()).sort();
   }, [data]);
 
   // Apply filters in memory
@@ -97,7 +102,8 @@ function HistoryPage() {
         normalizeActivityType(a.activity_type) === filterType;
 
       const matchesVillage =
-        filterVillage === "All" || a.village_name === filterVillage;
+        filterVillage === "All" ||
+        normalizeVillageKey(a.village_name) === normalizeVillageKey(filterVillage);
 
       let matchesDate = true;
       if (filterStartDate) {
@@ -117,7 +123,7 @@ function HistoryPage() {
     const approved = filteredActivities.filter((a) => a.status === "Approved").length;
     const pending = filteredActivities.filter((a) => a.status === "Pending").length;
     const rejected = filteredActivities.filter((a) => a.status === "Rejected").length;
-    const villages = new Set(filteredActivities.map((a) => a.village_name).filter(Boolean)).size;
+    const villages = uniqueVillageCount(filteredActivities, (a) => a.village_name);
     const beneficiaries = filteredActivities.reduce((acc, a) => acc + (a.beneficiaries || 0), 0);
 
     return { total, approved, pending, rejected, villages, beneficiaries };

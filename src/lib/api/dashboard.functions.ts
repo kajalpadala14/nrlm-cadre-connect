@@ -15,7 +15,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { requireStaffScope, resolveScopedBlockId } from "@/lib/api/access-scope";
 import { getActivityLabel } from "@/constants/activityTypes";
-import { calculateAttendanceRate } from "@/lib/utils/attendance";
+import { calculateAttendanceRate, toISTDateString } from "@/lib/utils/attendance";
 
 // ─── GET DASHBOARD STATS ─────────────────────────────────────
 /**
@@ -40,7 +40,7 @@ export const getDashboardStats = createServerFn({ method: "POST" })
     const scope = await requireStaffScope(supabase, userId);
     const effectiveBlockId = resolveScopedBlockId(scope, data.block_id ?? null);
 
-    const targetDate = data.date ?? new Date().toISOString().slice(0, 10);
+    const targetDate = data.date ?? toISTDateString(new Date());
 
     const { data: stats, error } = await supabase.rpc("get_dashboard_stats", {
       p_date: targetDate,
@@ -49,7 +49,8 @@ export const getDashboardStats = createServerFn({ method: "POST" })
 
     if (error) throw new Error(`Dashboard stats error: ${error.message}`);
     
-    // Override the raw Postgres attendance percentage with our unified TS logic
+    // Override the raw Postgres attendance percentage with the unified formula:
+    // (present + late) / total users * 100.
     const typedStats = stats as any;
     typedStats.attendance_pct = calculateAttendanceRate(
       typedStats.present_today ?? 0, 
@@ -93,7 +94,7 @@ export const getBlockSummary = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const scope = await requireStaffScope(supabase, userId);
 
-    const targetDate = data.date ?? new Date().toISOString().slice(0, 10);
+    const targetDate = data.date ?? toISTDateString(new Date());
 
     const { data: summary, error } = await supabase.rpc("get_block_attendance_summary", {
       p_date: targetDate,

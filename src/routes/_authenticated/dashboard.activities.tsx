@@ -47,6 +47,7 @@ import { BarChart3, Search, Calendar, Landmark } from "lucide-react";
 import { invalidateConsistencyQueries, useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { addActivityDraft, clearActivityDrafts, getActivityDrafts } from "@/lib/offline-drafts";
 import { ACTIVITY_TYPES, activityTypeForDB, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
+import { standardizeVillageName } from "@/lib/utils/villages";
 
 export const Route = createFileRoute("/_authenticated/dashboard/activities")({
   component: ActivitiesPage,
@@ -333,7 +334,10 @@ function ActivitiesPage() {
 
   const handleSubmit = async (status: "Pending" | "Draft") => {
     if (!profile) return;
-    if (!village.trim() || !panchayat.trim()) {
+    const cleanedVillage = standardizeVillageName(village, { logUnmatched: true });
+    const cleanedPanchayat = panchayat.trim();
+
+    if (!cleanedVillage || !cleanedPanchayat) {
       toast.error(t("all_required_fields"));
       return;
     }
@@ -356,8 +360,8 @@ function ActivitiesPage() {
       date: actDate,
       block_id: selectedBlockId,
       block_name: selectedBlockName,
-      village: village.trim(),
-      panchayat: panchayat.trim(),
+      village: cleanedVillage,
+      panchayat: cleanedPanchayat,
       activity_type: dbActivityType,
       activity_type_label: actType,
       description: description.trim() || null,
@@ -408,8 +412,8 @@ function ActivitiesPage() {
           cadre_id: profile.id,
           activity_date: actDate,
           block_id: selectedBlockId,
-          village_name: village.trim(),
-          panchayat: panchayat.trim(),
+          village_name: cleanedVillage,
+          panchayat: cleanedPanchayat,
           beneficiaries: beneficiaryCount,
           gps: gpsLocation || null,
           activity_type: dbActivityType,
@@ -482,7 +486,7 @@ function ActivitiesPage() {
           cadre_id: draft.cadre_id,
           activity_date: draft.date,
           block_id: draft.block_id,
-          village_name: draft.village,
+          village_name: standardizeVillageName(String(draft.village ?? ""), { logUnmatched: true }),
           panchayat: draft.panchayat,
           beneficiaries: draft.beneficiaries,
           gps: gpsLocation || null,

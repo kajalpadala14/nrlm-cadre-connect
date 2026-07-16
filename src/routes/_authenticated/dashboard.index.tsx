@@ -8,6 +8,7 @@ import {
   CalendarCheck,
   PlusCircle,
   UploadCloud,
+  ChevronLeft,
   ChevronRight,
   UserCheck,
   Check,
@@ -36,6 +37,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useActivityCacheSync } from "@/hooks/use-activity-cache-sync";
 import { ACTIVITY_TYPES, getActivityLabel, normalizeActivityType } from "@/constants/activityTypes";
+import {
+  logAttendanceDebug,
+  summarizeAttendanceForRate,
+  toISTDateString,
+} from "@/lib/utils/attendance";
+import { CADRE_ACCOUNT_ROLES } from "@/lib/roles";
+import { uniqueVillageCount } from "@/lib/utils/villages";
+
+const PENDING_APPROVALS_PAGE_SIZE = 10;
 
 export const Route = createFileRoute("/_authenticated/dashboard/")({
   component: Overview,
@@ -56,6 +66,7 @@ function Overview() {
   const [viewingActivityId, setViewingActivityId] = useState<string | null>(null);
   const [rejectionComment, setRejectionComment] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [pendingApprovalsPage, setPendingApprovalsPage] = useState(1);
 
   const { data: viewingActivity, isLoading: isViewingActivityLoading } = useQuery({
     queryKey: ["activity-detail", viewingActivityId],
@@ -102,28 +113,40 @@ function Overview() {
     },
   });
 
-  const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const dateStr = toISTDateString(date);
 
   // DB queries with live statistics
   // Wait for profile to load before running (blockId===null means not ready)
-  const { data: dbStats, refetch } = useQuery({
+  const { data: dbStats, refetch, isLoading: dbStatsLoading } = useQuery({
     queryKey: ["dash-stats-raw", blockId, dateStr],
     enabled: blockId !== null,
     queryFn: async () => {
       // Fetch cadreIds if blockId is a UUID (not "all")
       const cadreIds = blockId !== "all" && blockId ? await getCadreIdsInBlock(blockId) : [];
 
-      // 1. Total Cadres count (filtered by block_id if not 'all')
-      let totalCadres = 0;
+      // 1. Resolve registered and active cadre-like users for the selected scope.
+      // Attendance denominator uses active cadres only; inactive/transferred/disabled
+      // profiles remain visible in management counts but are not expected attendance.
+      let scopedCadreIds = cadreIds;
       if (blockId === "all") {
-        const { count } = await supabase
+        const { data: roleRows } = await supabase
           .from("user_roles")
-          .select("user_id", { count: "exact", head: true })
-          .eq("role", "cadre");
-        totalCadres = count ?? 0;
-      } else {
-        totalCadres = cadreIds.length;
+          .select("user_id")
+          .in("role", [...CADRE_ACCOUNT_ROLES]);
+        scopedCadreIds = (roleRows ?? []).map((row) => row.user_id);
       }
+
+      let activeAttendanceCadreIds: string[] = [];
+      if (scopedCadreIds.length > 0) {
+        const { data: attendanceProfiles } = await supabase
+          .from("profiles")
+          .select("id, status")
+          .in("id", scopedCadreIds);
+        activeAttendanceCadreIds = (attendanceProfiles ?? [])
+          .filter((profile) => (profile.status ?? "Active") === "Active")
+          .map((profile) => profile.id);
+      }
+      const totalCadres = scopedCadreIds.length;
 
       // 2. Attendance count (present, absent, on_leave) on dateStr for the block
       let attendanceQ = supabase.from("attendance").select("status, cadre_id, block_id");
@@ -133,15 +156,17 @@ function Overview() {
       attendanceQ = attendanceQ.eq("date", dateStr);
       const { data: attData } = await attendanceQ;
 
-      const presentCount = attData?.filter((a) => a.status === "present").length ?? 0;
-      const lateCount = attData?.filter((a) => a.status === "late").length ?? 0;
-      const absentCount = attData?.filter((a) => a.status === "absent").length ?? 0;
-      // pending = cadres who have activities today but no attendance record yet
-      // We compute this after fetching cadresWithActivitiesToday below.
-      const pendingAttendanceCount = attData?.filter(
-        (a) => a.status === "pending" || a.status === "pending_verification",
-      ).length ?? 0;
-      const leaveCount = attData?.filter((a) => a.status === "on_leave").length ?? 0;
+      const attendanceSummary = summarizeAttendanceForRate(
+        attData ?? [],
+        activeAttendanceCadreIds,
+      );
+      const presentCount = attendanceSummary.presentCount;
+      const lateCount = attendanceSummary.lateCount;
+      const absentCount = attendanceSummary.absentCount;
+      const pendingAttendanceCount = attendanceSummary.pendingCount;
+      const leaveCount = attendanceSummary.leaveCount;
+
+      logAttendanceDebug("ADMIN DASHBOARD", attendanceSummary);
 
       // 3. Activities counts (overall / lifetime) — used for status counts
       let actAllQ = supabase.from("activities").select("status, activity_type, cadre_id, block_id");
@@ -175,7 +200,7 @@ function Overview() {
       const shgMeetings = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[0]).length;
       const other = normalizedTodayTypes.filter((type) => type === ACTIVITY_TYPES[14]).length;
 
-      const villagesToday = new Set((actTodayRows ?? []).map((r) => r.village_name));
+      const villagesToday = uniqueVillageCount(actTodayRows ?? [], (r) => r.village_name);
       const panchayatsToday = new Set((actTodayRows ?? []).map((r) => r.panchayat).filter(Boolean));
       const evidenceUploadedToday = actTodayRows?.filter((r) => r.photo_url).length ?? 0;
 
@@ -188,6 +213,7 @@ function Overview() {
           cadre_id,
           village_name,
           activity_type,
+          activity_date,
           submitted_at,
           status,
           block_id
@@ -234,7 +260,7 @@ function Overview() {
         const { data: cadreRoles } = await supabase
           .from("user_roles")
           .select("user_id")
-          .eq("role", "cadre");
+          .in("role", [...CADRE_ACCOUNT_ROLES]);
         const cadreIdsForBlock = cadreRoles?.map((r) => r.user_id) || [];
         let profs: { id: string; block_id: string | null; status: string | null }[] = [];
         if (cadreIdsForBlock.length > 0) {
@@ -259,24 +285,26 @@ function Overview() {
 
         blocksList = blocksData.map((b) => {
           const cadresInBlock = profs?.filter((p) => p.block_id === b.id) ?? [];
-          // Include cadres that have attendance records for this block (covers profiles with null block_id)
+          const activeCadresInBlock = cadresInBlock.filter(
+            (p) => (p.status ?? "Active") === "Active",
+          );
+          // Include attendance records by profile block when attendance.block_id is null.
           const attsInBlock = atts?.filter((a) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) ?? [];
-          const attendanceCadreIds = attsInBlock.map((a) => a.cadre_id);
-          const total = new Set([...cadresInBlock.map((p) => p.id), ...attendanceCadreIds]).size;
+          const total = cadresInBlock.length;
 
-          const active = cadresInBlock.filter((p) => (p.status ?? "Active") === "Active").length;
+          const active = activeCadresInBlock.length;
           const inactive = cadresInBlock.filter((p) => p.status === "Inactive").length;
 
           const actsInBlock = acts?.filter((a) => a.block_id === b.id || cadreToBlockMap.get(a.cadre_id) === b.id) ?? [];
           const activities = actsInBlock.length;
 
-          const uniqueVillages = new Set(actsInBlock.map((a) => a.village_name));
-          const villages = uniqueVillages.size;
+          const villages = uniqueVillageCount(actsInBlock, (a) => a.village_name);
 
-          const submittedAttInBlock = attsInBlock.filter((a) => ['present', 'late'].includes(a.status));
-          
-          const attendance =
-            total > 0 ? ((submittedAttInBlock.length / total) * 100).toFixed(2) + "%" : "0.00%";
+          const blockAttendanceSummary = summarizeAttendanceForRate(
+            attsInBlock,
+            activeCadresInBlock.map((p) => p.id),
+          );
+          const attendance = `${blockAttendanceSummary.finalAttendanceRate}%`;
 
           return {
             name: b.name,
@@ -380,8 +408,18 @@ function Overview() {
         const profile = pendingProfilesMap.get(app.cadre_id);
         const cadreName = profile?.full_name || "Unknown Cadre";
         const cadreRole = profile?.cadre_type || "PRP";
-        const detailStr = `${getActivityLabel(app.activity_type)} at ${app.village_name}`;
+        const activityType = getActivityLabel(app.activity_type);
+        const detailStr = `${activityType} at ${app.village_name}`;
         const firstLetter = cadreName.charAt(0).toUpperCase();
+        const department =
+          blocksData?.find((block) => block.id === app.block_id)?.name ?? "NRLM";
+        const activityDate = app.activity_date
+          ? new Date(app.activity_date).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })
+          : timeStr;
 
         const bgClassMap: Record<string, string> = {
           PRP: "bg-emerald-100 text-emerald-800",
@@ -398,7 +436,11 @@ function Overview() {
         return {
           id: app.id,
           cadre: `${cadreRole} - ${cadreName}`,
+          name: cadreName,
+          type: activityType,
           detail: detailStr,
+          date: activityDate,
+          department,
           time: timeStr,
           status: "Pending",
           initial: firstLetter,
@@ -408,13 +450,15 @@ function Overview() {
 
       return {
         totalCadres,
+        attendanceExpected: attendanceSummary.expectedCount,
+        attendanceRate: attendanceSummary.finalAttendanceRate,
         activeToday: presentCount,
         lateToday: lateCount,
         inactiveToday: absentCount,
         pendingAttendanceToday: pendingAttendanceCount,
         leaveCount: leaveCount,
         activitiesToday: actTodayRows?.length ?? 0,
-        villagesToday: villagesToday.size,
+        villagesToday,
         panchayatsToday: panchayatsToday.size,
         evidenceUploadedToday,
         totalActivities,
@@ -450,11 +494,33 @@ function Overview() {
     evidenceUploaded: dbStats?.evidenceUploadedToday ?? 0,
     pendingApprovals: dbStats?.pendingActivities ?? 0,
     activitiesSubmitted: dbStats?.activitiesToday ?? 0,
-    attendancePercent:
-      dbStats?.totalCadres && dbStats.totalCadres > 0
-        ? parseFloat((((dbStats.activeToday + dbStats.lateToday) / dbStats.totalCadres) * 100).toFixed(2))
-        : 0,
+    attendancePercent: dbStats?.attendanceRate ?? 0,
   };
+
+  const pendingApprovalsList = dbStats?.pendingActivitiesList ?? [];
+  const pendingApprovalsTotal = pendingApprovalsList.length;
+  const pendingApprovalsTotalPages = Math.max(
+    1,
+    Math.ceil(pendingApprovalsTotal / PENDING_APPROVALS_PAGE_SIZE),
+  );
+  const currentPendingApprovalsPage = Math.min(
+    pendingApprovalsPage,
+    pendingApprovalsTotalPages,
+  );
+  const pendingApprovalsStartIndex =
+    (currentPendingApprovalsPage - 1) * PENDING_APPROVALS_PAGE_SIZE;
+  const pendingApprovalsEndIndex = Math.min(
+    pendingApprovalsStartIndex + PENDING_APPROVALS_PAGE_SIZE,
+    pendingApprovalsTotal,
+  );
+  const paginatedPendingApprovals = pendingApprovalsList.slice(
+    pendingApprovalsStartIndex,
+    pendingApprovalsEndIndex,
+  );
+  const pendingApprovalsRangeText =
+    pendingApprovalsTotal > 0
+      ? `Showing ${pendingApprovalsStartIndex + 1}-${pendingApprovalsEndIndex} of ${pendingApprovalsTotal} Pending Approvals`
+      : "No Pending Approvals";
 
   // ── Attendance Detail Sheet ──────────────────────────────────────────────
   // null = closed. "pending" covers both pending + pending_verification rows.
@@ -1427,56 +1493,105 @@ function Overview() {
                       </span>
                     )}
                   </div>
+                  <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    {dbStatsLoading ? "Loading pending approvals..." : pendingApprovalsRangeText}
+                  </div>
                   <div className="space-y-3">
-                    {(dbStats?.pendingActivitiesList || []).map((app) => (
-                      <div
-                        key={app.id}
-                        className="rounded-xl border border-slate-100 p-3 flex flex-col gap-2.5 shadow-sm bg-slate-50/20"
-                      >
-                        <div className="flex gap-2.5 text-xs">
-                          <div
-                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-bold border border-slate-100 ${app.bg}`}
-                          >
-                            {app.initial}
-                          </div>
-                          <div className="min-w-0 flex-1 leading-snug">
-                            <p className="font-bold text-slate-700 truncate">{app.cadre}</p>
-                            <p className="text-[11px] text-slate-400 mt-0.5">{app.detail}</p>
-                            <p className="text-[10px] text-slate-400 font-semibold mt-1">
-                              {app.time}
-                            </p>
+                    {dbStatsLoading &&
+                      Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="rounded-xl border border-slate-100 p-3 shadow-sm">
+                          <div className="flex gap-2.5">
+                            <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+                            <div className="flex-1 space-y-2">
+                              <Skeleton className="h-3 w-2/3" />
+                              <Skeleton className="h-3 w-full" />
+                              <Skeleton className="h-3 w-1/2" />
+                            </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between gap-2 border-t border-slate-100/60 pt-2.5">
-                          <span className="rounded-md bg-amber-50 border border-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-600 uppercase tracking-wide">
-                            {app.status}
-                          </span>
-                          <div className="flex gap-1.5">
-                            <button
-                              onClick={() => setViewingActivityId(app.id)}
-                              className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 transition-colors inline-flex items-center gap-1"
+                      ))}
+                    {!dbStatsLoading &&
+                      paginatedPendingApprovals.map((app) => (
+                        <div
+                          key={app.id}
+                          className="rounded-xl border border-slate-100 p-3 flex flex-col gap-2.5 shadow-sm bg-slate-50/20"
+                        >
+                          <div className="flex gap-2.5 text-xs">
+                            <div
+                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-bold border border-slate-100 ${app.bg}`}
                             >
-                              <Eye className="h-3 w-3" />
-                              View
-                            </button>
-                            <button
-                              onClick={() => handleApprove(app.id, app.cadre)}
-                              className="rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-700 transition-colors inline-flex items-center gap-1"
-                            >
-                              <Check className="h-3 w-3" />
-                              Approve
-                            </button>
+                              {app.initial}
+                            </div>
+                            <div className="min-w-0 flex-1 leading-snug">
+                              <p className="font-bold text-slate-700 truncate">{app.name}</p>
+                              <div className="mt-1 grid gap-1 text-[10px] font-semibold text-slate-500 sm:grid-cols-2">
+                                <span className="truncate">Type: {app.type}</span>
+                                <span className="truncate">Date: {app.date}</span>
+                                <span className="truncate">Department: {app.department}</span>
+                                <span className="truncate">Status: {app.status}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-1">{app.detail}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 border-t border-slate-100/60 pt-2.5">
+                            <span className="rounded-md bg-amber-50 border border-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-600 uppercase tracking-wide">
+                              {app.status}
+                            </span>
+                            <div className="flex gap-1.5">
+                              <button
+                                onClick={() => setViewingActivityId(app.id)}
+                                className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50 transition-colors inline-flex items-center gap-1"
+                              >
+                                <Eye className="h-3 w-3" />
+                                View
+                              </button>
+                              <button
+                                onClick={() => handleApprove(app.id, app.cadre)}
+                                className="rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-700 transition-colors inline-flex items-center gap-1"
+                              >
+                                <Check className="h-3 w-3" />
+                                Approve
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                    {(dbStats?.pendingActivitiesList || []).length === 0 && (
+                      ))}
+                    {!dbStatsLoading && pendingApprovalsTotal === 0 && (
                       <div className="text-center py-6 text-xs text-slate-400 flex flex-col items-center justify-center gap-1">
                         <CheckCircle2 className="h-8 w-8 text-emerald-500 mb-1" />
-                        No pending approvals remaining.
+                        No Pending Approvals
                       </div>
                     )}
                   </div>
+                  {!dbStatsLoading && pendingApprovalsTotal > PENDING_APPROVALS_PAGE_SIZE && (
+                    <div className="mt-4 flex flex-col gap-2 border-t border-slate-50 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={() => setPendingApprovalsPage((page) => Math.max(1, page - 1))}
+                        disabled={currentPendingApprovalsPage === 1}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                        Previous
+                      </button>
+                      <span className="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        Page {currentPendingApprovalsPage} of {pendingApprovalsTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPendingApprovalsPage((page) =>
+                            Math.min(pendingApprovalsTotalPages, page + 1),
+                          )
+                        }
+                        disabled={currentPendingApprovalsPage === pendingApprovalsTotalPages}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Next
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="border-t border-slate-50 pt-3 mt-4 text-center">
                   <Link

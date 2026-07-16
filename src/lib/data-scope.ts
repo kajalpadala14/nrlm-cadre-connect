@@ -1,7 +1,7 @@
 import { highestRole } from "@/hooks/use-auth";
 import type { ProfileWithRoles } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
-import { isBlockScopedStaffRole } from "@/lib/roles";
+import { CADRE_ACCOUNT_ROLES, isBlockScopedStaffRole } from "@/lib/roles";
 
 export interface UserScope {
   /** true once the profile has finished loading */
@@ -57,11 +57,11 @@ export function getUserDataScope(user: ProfileWithRoles | null | undefined): Use
 export async function getCadreIdsInBlock(blockId: string): Promise<string[]> {
   if (!isValidUUID(blockId)) return [];
 
-  // Get all users with cadre role
+  // Get all cadre-like users, including FNHW/SI field accounts.
   const { data: userRoles, error: urError } = await supabase
     .from("user_roles")
     .select("user_id")
-    .eq("role", "cadre");
+    .in("role", [...CADRE_ACCOUNT_ROLES]);
   if (urError || !userRoles || userRoles.length === 0) return [];
 
   const allCadreIds = userRoles.map((r) => r.user_id);

@@ -23,6 +23,12 @@ async function requireStaff(supabase: Parameters<typeof requireStaffScope>[0], u
   await requireStaffScope(supabase, userId);
 }
 
+const activityStatusByApprovalAction = {
+  approved: "Approved",
+  rejected: "Rejected",
+  revision_requested: "Pending",
+} as const;
+
 // ─── GET PENDING APPROVALS ───────────────────────────────────
 /**
  * Staff fetches a list of activities awaiting their review.
@@ -144,10 +150,16 @@ export const reviewActivity = createServerFn({ method: "POST" })
 
     if (approvalErr) throw new Error(`Approval error: ${approvalErr.message}`);
 
-    // Sync the denormalized status on the activity itself
+    // Sync the denormalized title-case status on the activity itself.
+    // activities.status has a CHECK constraint for Pending/Approved/Rejected.
     const { error: actErr } = await supabase
       .from("activities")
-      .update({ status: data.action })
+      .update({
+        status: activityStatusByApprovalAction[data.action],
+        comment: data.remarks ?? null,
+        approved_at: now,
+        approved_by: userId,
+      })
       .eq("id", approval.activity_id);
 
     if (actErr) throw new Error(`Activity sync error: ${actErr.message}`);

@@ -27,7 +27,13 @@ import { getUserDataScope } from "@/lib/data-scope";
 import { supabase } from "@/integrations/supabase/client";
 import { createUser, deleteUser, resetUserPin, updateUserProfile } from "@/lib/admin.functions";
 import { CADRE_LOCATION_MAX_LENGTH } from "@/lib/validation-limits";
-import { isBlockScopedStaffRole, type BlockScopedStaffRole } from "@/lib/roles";
+import {
+  CADRE_ACCOUNT_ROLES,
+  STAFF_ROLES,
+  isBlockScopedStaffRole,
+  type BlockScopedStaffRole,
+} from "@/lib/roles";
+import { standardizeVillageName } from "@/lib/utils/villages";
 
 export const Route = createFileRoute("/_authenticated/dashboard/users")({
   component: UsersPage,
@@ -156,7 +162,7 @@ function UsersPage() {
       const { data: userRoles, error: rolesError } = await supabase
         .from("user_roles")
         .select("user_id, role")
-        .in("role", ["admin", "block_officer"]);
+        .in("role", [...STAFF_ROLES]);
 
       if (rolesError) {
         console.error("[staff-list] user_roles fetch error:", rolesError);
@@ -219,7 +225,7 @@ function UsersPage() {
       const { data: userRoles, error: urError } = await supabase
         .from("user_roles")
         .select("user_id, role")
-        .in("role", ["cadre", "fnhw", "si"]);
+        .in("role", [...CADRE_ACCOUNT_ROLES]);
       if (urError) throw urError;
 
       const cadreIds = userRoles.map((ur) => ur.user_id);
@@ -319,7 +325,7 @@ function UsersPage() {
       toast.error(t("toast_phone_digits"));
       return;
     }
-    const village = form.village.trim();
+    const village = standardizeVillageName(form.village, { logUnmatched: true });
     const panchayat = form.panchayat.trim();
     if (village.length > CADRE_LOCATION_MAX_LENGTH) {
       toast.error(`Village must be ${CADRE_LOCATION_MAX_LENGTH} characters or fewer.`);

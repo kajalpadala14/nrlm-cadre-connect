@@ -31,6 +31,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { invalidateConsistencyQueries } from "@/hooks/use-activity-cache-sync";
 import { addActivityDraft, clearActivityDrafts, getActivityDrafts } from "@/lib/offline-drafts";
+import { standardizeVillageName } from "@/lib/utils/villages";
 
 import { ACTIVITY_TYPES, activityTypeForDB, getActivityLabel } from "@/constants/activityTypes";
 
@@ -648,7 +649,10 @@ function SubmitPage() {
       return;
     }
     console.log("Profile loaded:", profile.id);
-    if (!blockId || !village.trim() || !panchayat.trim() || !actType) {
+    const cleanedVillage = standardizeVillageName(village, { logUnmatched: true });
+    const cleanedPanchayat = panchayat.trim();
+
+    if (!blockId || !cleanedVillage || !cleanedPanchayat || !actType) {
       console.warn("Form validation failed — missing fields:", { blockId, village, panchayat, actType });
       toast.error("सभी आवश्यक फ़ील्ड भरें / Please fill all required fields");
       return;
@@ -683,8 +687,8 @@ function SubmitPage() {
       activity_date: actDate,
       block_id: selectedDbBlockId,
       block_name: selectedBlock?.name ?? "",
-      panchayat: panchayat.trim(),
-      village_name: village.trim(),
+      panchayat: cleanedPanchayat,
+      village_name: cleanedVillage,
       activity_type: dbActivityType,
       activity_type_label: actType,
       description: desc.trim() || null,
@@ -735,7 +739,7 @@ function SubmitPage() {
         .eq("cadre_id", profile.id)
         .eq("activity_date", actDate)
         .eq("activity_type", dbActivityType)
-        .eq("village_name", village.trim())
+        .eq("village_name", cleanedVillage)
         .maybeSingle();
 
       if (dupError) {
@@ -754,8 +758,8 @@ function SubmitPage() {
         cadre_id: profile.id,
         activity_date: actDate,
         block_id: selectedDbBlockId,
-        village_name: village.trim(),
-        panchayat: panchayat.trim(),
+        village_name: cleanedVillage,
+        panchayat: cleanedPanchayat,
         beneficiaries: beneficiaryCount,
         gps: gpsLocation,
         activity_type: dbActivityType,
@@ -915,7 +919,7 @@ function SubmitPage() {
           cadre_id: draft.cadre_id,
           activity_date: draft.activity_date,
           block_id: draft.block_id,
-          village_name: draft.village_name,
+          village_name: standardizeVillageName(String(draft.village_name ?? ""), { logUnmatched: true }),
           panchayat: draft.panchayat,
           beneficiaries: draft.beneficiaries,
           gps: draft.gps,
