@@ -31,8 +31,8 @@ function normalizeCreateUserRole(role: CreateUserRole): AppRole {
   if (role === "DPM") return "admin";
   if (role === "BPM" || role === "AC") return "block_officer";
   if (role === "Gender") return "cadre";
-  if (role === "FNHW") return "fnhw";
-  if (role === "SI") return "si";
+  if (role === "FNHW") return "cadre";
+  if (role === "SI") return "cadre";
   return role;
 }
 

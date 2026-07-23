@@ -3,8 +3,10 @@ import type { Database } from "@/integrations/supabase/types";
 export type AppRole = Database["public"]["Enums"]["app_role"];
 export type CadreType = Database["public"]["Enums"]["cadre_type"];
 
-export const BLOCK_SCOPED_STAFF_ROLES = ["block_officer", "fnhw", "si"] as const;
+export const BLOCK_SCOPED_STAFF_ROLES = ["block_officer"] as const;
 export const STAFF_ROLES = ["admin", ...BLOCK_SCOPED_STAFF_ROLES] as const;
+// Keep fnhw/si here for legacy rows already stored in user_roles, but new
+// FNHW/SI accounts are saved as role=cadre with cadre_type=FNHW/SI.
 export const CADRE_ACCOUNT_ROLES = ["cadre", "fnhw", "si"] as const;
 export const CADRE_TYPE_OPTIONS: readonly CadreType[] = [
   "PRP",

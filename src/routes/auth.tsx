@@ -10,7 +10,7 @@ import { signInWithIdPin, useSession } from "@/hooks/use-auth";
 import { ensureAdminSeeded } from "@/lib/admin.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { Languages } from "lucide-react";
-import { hasStaffRole } from "@/lib/roles";
+import { hasStaffRole, isCadreAccountRole } from "@/lib/roles";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -77,7 +77,7 @@ function AuthPage() {
           const roles = (roleRows ?? []).map((r) => r.role as string);
           if (hasStaffRole(roles)) {
             destination = "/dashboard";
-          } else if (roles.includes("cadre")) {
+          } else if (roles.some(isCadreAccountRole)) {
             destination = "/cadre";
           }
         }

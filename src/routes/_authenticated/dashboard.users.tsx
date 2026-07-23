@@ -108,11 +108,7 @@ const getStaffRoleLabel = (role: StaffFormRole) =>
         ? "BPM (Block Programme Manager)"
         : role === "AC"
           ? "AC (Area Coordinator)"
-          : role === "fnhw"
-            ? "FNHW"
-            : role === "si"
-              ? "SI"
-              : "Block Officer";
+          : "Block Officer";
 
 function UsersPage() {
   const { t } = useT();
@@ -366,7 +362,7 @@ function UsersPage() {
             user_id: form.user_id.trim(),
             full_name: form.name,
             phone: form.phone || null,
-            role: (form.role === "FNHW" ? "fnhw" : form.role === "SI" ? "si" : "cadre"),
+            role: "cadre",
             cadre_type: form.role as CadreType,
             block_id: scope.isScoped && scope.blockId ? scope.blockId : form.block_id || null,
             village: village || null,
@@ -397,7 +393,7 @@ function UsersPage() {
             pin: form.pin,
             full_name: form.name,
             phone: form.phone || null,
-            role: (form.role === "FNHW" ? "fnhw" : form.role === "SI" ? "si" : "cadre"),
+            role: "cadre",
             cadre_type: form.role as CadreType,
             block_id: scope.isScoped && scope.blockId ? scope.blockId : form.block_id || null,
             village: village || null,
