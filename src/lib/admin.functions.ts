@@ -25,11 +25,14 @@ function passwordFor(pin: string) {
   return `NRLM-${pin}`;
 }
 
-type CreateUserRole = AppRole | "BPM" | "DPM" | "AC";
+type CreateUserRole = AppRole | "BPM" | "DPM" | "AC" | "Gender" | "FNHW" | "SI";
 
 function normalizeCreateUserRole(role: CreateUserRole): AppRole {
   if (role === "DPM") return "admin";
   if (role === "BPM" || role === "AC") return "block_officer";
+  if (role === "Gender") return "cadre";
+  if (role === "FNHW") return "fnhw";
+  if (role === "SI") return "si";
   return role;
 }
 
@@ -89,7 +92,19 @@ const createUserInput = z.object({
   pin: pinSchema,
   full_name: z.string().trim().min(1).max(120),
   phone: z.string().trim().max(20).optional().nullable(),
-  role: z.enum(["admin", "block_officer", "fnhw", "si", "cadre", "BPM", "DPM", "AC"]),
+  role: z.enum([
+    "admin",
+    "block_officer",
+    "fnhw",
+    "si",
+    "cadre",
+    "BPM",
+    "DPM",
+    "AC",
+    "Gender",
+    "FNHW",
+    "SI",
+  ]),
   cadre_type: z
     .enum(["PRP", "FLCRP", "RBK", "IFC_Anchor", "SR_CRP", "FPO_CEO", "Gender", "FNHW", "SI"])
     .nullable()
@@ -137,9 +152,10 @@ export const createUser = createServerFn({ method: "POST" })
     if (!isAdmin && !isBlockOfficer) throw new Error("Forbidden: admin or block officer only");
 
     const systemRole = normalizeCreateUserRole(data.role);
+    const isTargetCadreAccount = isCadreAccountRole(systemRole);
 
-    // Block officers may only create cadres — not other admins or block officers
-    if (!isAdmin && systemRole !== "cadre") {
+    // Block officers may only create cadre accounts, including FNHW/SI cadre roles.
+    if (!isAdmin && !isTargetCadreAccount) {
       throw new Error("Forbidden: block officers can only create cadre accounts");
     }
 
@@ -178,13 +194,13 @@ export const createUser = createServerFn({ method: "POST" })
           user_id: data.user_id,
           full_name: data.full_name,
           phone: data.phone ?? null,
-          cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
+          cadre_type: isTargetCadreAccount ? (data.cadre_type ?? null) : null,
           block_id: data.block_id ?? null,
-          village: systemRole === "cadre" ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
-          panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
-          gender: systemRole === "cadre" ? (data.gender ?? null) : null,
-          join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
-          status: systemRole === "cadre" ? (data.status ?? null) : null,
+          village: isTargetCadreAccount ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
+          panchayat: isTargetCadreAccount ? (data.panchayat ?? null) : null,
+          gender: isTargetCadreAccount ? (data.gender ?? null) : null,
+          join_date: isTargetCadreAccount ? (data.join_date ?? null) : null,
+          status: isTargetCadreAccount ? (data.status ?? null) : null,
         },
         { onConflict: "id" },
       );
@@ -209,13 +225,13 @@ export const createUser = createServerFn({ method: "POST" })
       user_id: data.user_id,
       full_name: data.full_name,
       phone: data.phone ?? null,
-      cadre_type: systemRole === "cadre" ? (data.cadre_type ?? null) : null,
+      cadre_type: isTargetCadreAccount ? (data.cadre_type ?? null) : null,
       block_id: data.block_id ?? null,
-      village: systemRole === "cadre" ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
-      panchayat: systemRole === "cadre" ? (data.panchayat ?? null) : null,
-      gender: systemRole === "cadre" ? (data.gender ?? null) : null,
-      join_date: systemRole === "cadre" ? (data.join_date ?? null) : null,
-      status: systemRole === "cadre" ? (data.status ?? null) : null,
+      village: isTargetCadreAccount ? standardizeVillageName(data.village, { logUnmatched: true }) || null : null,
+      panchayat: isTargetCadreAccount ? (data.panchayat ?? null) : null,
+      gender: isTargetCadreAccount ? (data.gender ?? null) : null,
+      join_date: isTargetCadreAccount ? (data.join_date ?? null) : null,
+      status: isTargetCadreAccount ? (data.status ?? null) : null,
     });
     if (pErr) {
       await supabaseAdmin.auth.admin.deleteUser(newId);
